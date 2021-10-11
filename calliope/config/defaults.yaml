@@ -186,6 +186,7 @@ tech_groups:
         "storage_loss",
         "storage_time_max",
         "storage_discharge_depth",
+        "storage_charge_depth",
         "units_equals",
         "units_equals_systemwide",
         "units_max",
