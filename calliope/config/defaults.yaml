@@ -57,6 +57,8 @@ model:
       "resource_eff",
       "storage_loss",
       "carrier_ratios",
+      'storage_charge_depth',
+      'storage_discharge_depth'
     ] # List of configuration options allowed to specify "file=" to load timeseries data. This can be updated if you're adding a new custom constraint that requires a newly defined parameter to be a timeseries. If updating existing parameters, you can expect existing constraints to not change behaviour or to break on being constructed.
   custom_math: [] # List of references to files which contain custom mathematical formulations. If referring to an in-built Calliope custom math file (see documentation for available files), do not append the reference with ".yaml". If referring to your own custom math file, ensure the file type is given as a suffix (".yaml" or ".yml"). Relative paths will be assumed to be relative to the `config` file given when creating a calliope Model (`calliope.Model(config)`)
 

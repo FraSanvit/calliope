@@ -68,6 +68,10 @@ Internal changes
 0.6.8 (2022-02-07)
 ------------------
 
+|changed| Initial_storage is then checked if smaller or greater than initial and final value storage_charge_depth and storage_discharge_depth.
+
+|changed| Storage_discharge_depth and storage_charge_depth are now allowed to be timeseries.
+
 |new| run configuration parameter to enable relaxation of the `demand_share_per_timestep_decision` constraint.
 
 |new| `storage_cap_min/equals/max` group constraints added.
