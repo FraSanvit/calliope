@@ -770,16 +770,7 @@ def check_model_data(model_data):
         else:
             model_data.attrs["allow_operate_mode"] = 1
 
-    # Check for any milp constraints, and warn that the problem contains binary /
-    # integer decision variables
-    if any("_milp_constraint" in i for i in model_data.dims):
-        model_warnings.append(
-            "Integer and / or binary decision variables are included in this model. "
-            "This may adversely affect solution time, particularly if you are "
-            "using a non-commercial solver. To improve solution time, consider "
-            "changing MILP related solver options (e.g. `mipgap`) or removing "
-            "MILP constraints."
-        )
+
 
     # Check for storage_initial being a fractional value
 
@@ -799,23 +790,52 @@ def check_model_data(model_data):
                 ):
                     model_data.storage_initial.loc[{"loc_techs_store": loc_tech}] = 0.0
 
-    # Check for storage_initial being greater than or equal to the storage_discharge_depth
+    # Check for storage_initial being greater than or equal to the initial and final storage_discharge_depth
 
     if hasattr(model_data, "loc_techs_store"):
         for loc_tech in model_data.loc_techs_store.values:
             if hasattr(model_data, "storage_initial") and hasattr(
                 model_data, "storage_discharge_depth"
-            ):
+            ):                
                 if (
                     model_data.storage_initial.loc[{"loc_techs_store": loc_tech}].values
                     < model_data.storage_discharge_depth.loc[
                         {"loc_techs_store": loc_tech}
-                    ].values
+                    ].values[0]
+                    or
+                    model_data.storage_initial.loc[{"loc_techs_store": loc_tech}].values
+                    < model_data.storage_discharge_depth.loc[
+                        {"loc_techs_store": loc_tech}
+                    ].values[-1]
                 ):
                     errors.append(
                         "storage_initial is smaller than storage_discharge_depth."
                         " Please change the model configuration to ensure that"
                         " storage initial is greater than or equal to storage_discharge_depth"
+                    )
+
+    # Check for storage_initial being smaller than or equal to the initial and final storage_charge_depth 
+
+    if hasattr(model_data, "loc_techs_store"):
+        for loc_tech in model_data.loc_techs_store.values:
+            if hasattr(model_data, "storage_initial") and hasattr(
+                model_data, "storage_charge_depth"
+            ):              
+                if (
+                    model_data.storage_initial.loc[{"loc_techs_store": loc_tech}].values
+                    > model_data.storage_charge_depth.loc[
+                        {"loc_techs_store": loc_tech}
+                    ].values[0]
+                    or
+                    model_data.storage_initial.loc[{"loc_techs_store": loc_tech}].values
+                    > model_data.storage_charge_depth.loc[
+                        {"loc_techs_store": loc_tech}
+                    ].values[-1]
+                ):
+                    errors.append(
+                        "storage_initial is greater than storage_charge_depth."
+                        " Please change the model configuration to ensure that"
+                        " storage initial is smaller than or equal to storage_charge_depth"
                     )
 
     # Check for storage_inter_cluster not being used together with storage_discharge_depth
@@ -824,6 +844,14 @@ def check_model_data(model_data):
     ):
         errors.append(
             "storage_discharge_depth is currently not allowed when time clustering is active."
+        )
+    
+    # Check for storage_inter_cluster not being used together with storage_charge_depth
+    if hasattr(model_data, "clusters") and hasattr(
+        model_data, "storage_charge_depth"
+    ):
+        errors.append(
+            "storage_charge_depth is currently not allowed when time clustering is active."
         )
 
     return model_data, comments, model_warnings, errors
