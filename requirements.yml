@@ -4,24 +4,14 @@ channels:
     - conda-forge
 
 dependencies:
-    - bottleneck
-    - click
+    - bottleneck < 2
     - coverage >= 4.4
-    - codecov
-    - glpk=4.61
-    - hdf5
-    - ipdb
-    - ipython
-    - libnetcdf
-    - natsort
-    - netcdf4
-    - numpy>=1.15,<1.20
-    - pandas=1.2
-    - pre-commit
-    - pyomo=6.0
-    - pytest-cov
-    - pytest-xdist  # pytest distributed testing plugin
-    - pytest
-    - ruamel.yaml=0.16
-    - scikit-learn>=0.22,<0.24  # 0.24 leads to failed clustering, due to some API change
-    - xarray=0.17
+    - codecov < 3
+    - glpk = 5.0
+    - hdf5 < 2
+    - libnetcdf < 5
+    - pre-commit < 4
+    - pytest-cov < 5
+    - pytest-xdist < 4 # pytest distributed testing plugin
+    - pytest < 8
+

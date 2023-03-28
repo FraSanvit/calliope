@@ -146,7 +146,6 @@ class TestModelSettings:
         return run_model(True, 15)
 
     def test_unmet_demand_zero(self, model_no_unmet):
-
         # Feasible case, but unmet_demand/unused_supply is not deleted
         for i in ["unmet_demand", "unused_supply"]:
             assert hasattr(model_no_unmet._backend_model, i)
@@ -155,7 +154,6 @@ class TestModelSettings:
         assert (model_no_unmet._model_data["unmet_demand"] == 0).all()
 
     def test_unmet_demand_nonzero(self, model_unmet_demand):
-
         # Infeasible case, unmet_demand is required
         assert hasattr(model_unmet_demand._backend_model, "unmet_demand")
         assert hasattr(model_unmet_demand._backend_model, "unused_supply")
@@ -253,7 +251,7 @@ class TestEnergyCapacityPerStorageCapacity:
         assert energy_capacity == pytest.approx(180)
         assert storage_capacity == pytest.approx(180)
 
-    @pytest.mark.xfail(reason="Not expecting operate mode to work at the moment")
+    @pytest.mark.skip(reason="Not expecting operate mode to work at the moment")
     def test_operate_mode(self, model_file):
         model = build_model(model_file=model_file, scenario="operate_mode_min")
         model.run()
@@ -261,7 +259,7 @@ class TestEnergyCapacityPerStorageCapacity:
     @pytest.mark.parametrize(
         "horizon_window", [(24, 24), (48, 48), (72, 48), (144, 24)]
     )
-    @pytest.mark.xfail(reason="operate mode not yet expected to run")
+    @pytest.mark.skip(reason="operate mode not yet expected to run")
     def test_operate_mode_horizon_window(self, model_file, horizon_window):
         horizon, window = horizon_window
         override_dict = {

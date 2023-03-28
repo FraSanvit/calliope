@@ -8,11 +8,20 @@ model.py
 Implements the core Model class.
 
 """
+from __future__ import annotations
+
 import logging
 import warnings
+from typing import Literal, Union, Optional, Callable
+from contextlib import contextmanager
+import os
+from pathlib import Path
+from calliope.core.util.tools import relative_path
 
 import xarray as xr
+import pandas as pd
 
+import calliope
 from calliope.postprocess import results as postprocess_results
 from calliope.core import io
 from calliope.preprocess import (
@@ -22,9 +31,9 @@ from calliope.preprocess import (
 from calliope.preprocess.model_data import ModelDataFactory
 from calliope.core.attrdict import AttrDict
 from calliope.core.util.logging import log_time
-from calliope.core.util.observed_dict import UpdateObserverDict
 from calliope import exceptions
 from calliope.backend.run import run as run_backend
+from calliope.backend import backends
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +53,16 @@ class Model(object):
 
     """
 
-    def __init__(self, config, model_data=None, debug=False, *args, **kwargs):
+    _BACKENDS: dict[str, Callable] = {"pyomo": backends.PyomoBackendModel}
+
+    def __init__(
+        self,
+        config: Optional[Union[str, dict]],
+        model_data: Optional[xr.Dataset] = None,
+        debug: bool = False,
+        *args,
+        **kwargs,
+    ):
         """
         Returns a new Model from either the path to a YAML model
         configuration file or a dict fully specifying the model.
@@ -61,14 +79,22 @@ class Model(object):
             a model previously saved to a NetCDF file.
 
         """
-        self._timings = {}
+        self._timings: dict = {}
+        self.defaults: AttrDict
+        self.model_config: AttrDict
+        self.run_config: AttrDict
+        self.math: AttrDict
+        self._config_path: Optional[str]
+
         # try to set logging output format assuming python interactive. Will
         # use CLI logging format if model called from CLI
         log_time(logger, self._timings, "model_creation", comment="Model: initialising")
         if isinstance(config, str):
+            self._config_path = config
             model_run, debug_data = model_run_from_yaml(config, *args, **kwargs)
             self._init_from_model_run(model_run, debug_data, debug)
         elif isinstance(config, dict):
+            self._config_path = None
             model_run, debug_data = model_run_from_dict(config, *args, **kwargs)
             self._init_from_model_run(model_run, debug_data, debug)
         elif model_data is not None and config is None:
@@ -105,7 +131,6 @@ class Model(object):
             self._debug_data = debug_data
             self._model_data_pre_time = data_pre_time
             self._model_data_stripped_keys = stripped_keys
-        self.inputs = self._model_data.filter_by_attrs(is_result=0)
         log_time(
             logger,
             self._timings,
@@ -117,20 +142,16 @@ class Model(object):
         model_config = {
             k: v for k, v in model_run.get("model", {}).items() if k != "file_allowed"
         }
-        self.model_config = UpdateObserverDict(
-            initial_dict=model_config, name="model_config", observer=self._model_data
-        )
-        self.run_config = UpdateObserverDict(
-            initial_dict=model_run.get("run", {}),
-            name="run_config",
-            observer=self._model_data,
-        )
-        self.subsets = UpdateObserverDict(
-            initial_dict=model_run.get("subsets").as_dict_flat(),
-            name="subsets",
-            observer=self._model_data,
-        )
 
+        self._add_observed_dict("model_config", model_config)
+        self._add_observed_dict("run_config", model_run["run"])
+        self._add_observed_dict("subsets", model_run["subsets"])
+        self._add_observed_dict("defaults", self._generate_default_dict())
+
+        math = self._add_math(model_config["custom_math"])
+        self._add_observed_dict("math", math)
+
+        self.inputs = self._model_data.filter_by_attrs(is_result=0)
         log_time(
             logger,
             self._timings,
@@ -162,23 +183,12 @@ class Model(object):
     def _add_model_data_methods(self):
         self.inputs = self._model_data.filter_by_attrs(is_result=0)
         self.results = self._model_data.filter_by_attrs(is_result=1)
-        self.model_config = UpdateObserverDict(
-            initial_yaml_string=self._model_data.attrs.get("model_config", "{}"),
-            name="model_config",
-            observer=self._model_data,
-        )
-        self.run_config = UpdateObserverDict(
-            initial_yaml_string=self._model_data.attrs.get("run_config", "{}"),
-            name="run_config",
-            observer=self._model_data,
-        )
-        self.subsets = UpdateObserverDict(
-            initial_yaml_string=self._model_data.attrs.get("subsets", "{}"),
-            name="subsets",
-            observer=self._model_data,
-            flat=True,
-        )
+        self._add_observed_dict("model_config")
+        self._add_observed_dict("run_config")
+        self._add_observed_dict("subsets")
+        self._add_observed_dict("math")
 
+        self.inputs = self._model_data.filter_by_attrs(is_result=0)
         results = self._model_data.filter_by_attrs(is_result=1)
         if len(results.data_vars) > 0:
             self.results = results
@@ -188,6 +198,214 @@ class Model(object):
             "model_data_loaded",
             comment="Model: loaded model_data",
         )
+
+    def _add_observed_dict(self, name: str, dict_to_add: Optional[dict] = None) -> None:
+        """
+        Add the same dictionary as property of model object and an attribute of the model xarray dataset.
+
+        Args:
+            name (str):
+                Name of dictionary which will be set as the model property name and (if necessary) the dataset attribute name.
+            dict_to_add (Optional[dict], optional):
+                If given, set as both the model property and the dataset attribute, otherwise set an existing dataset attribute as a model property of the same name. Defaults to None.
+
+        Raises:
+            exceptions.ModelError: If `dict_to_add` is not given, it must be an attribute of model data.
+            TypeError: `dict_to_add` must be a dictionary.
+        """
+        if dict_to_add is None:
+            try:
+                dict_to_add = self._model_data.attrs[name]
+            except KeyError:
+                raise exceptions.ModelError(
+                    f"Expected the model property `{name}` to be a dictionary attribute of the model dataset. If you are loading the model from a NetCDF file, ensure it is a valid Calliope model."
+                )
+        if not isinstance(dict_to_add, dict):
+            raise TypeError(
+                f"Attempted to add dictionary property `{name}` to model, but received argument of type `{type(dict_to_add).__name__}`"
+            )
+        else:
+            dict_to_add = AttrDict(dict_to_add)
+        self._model_data.attrs[name] = dict_to_add
+        setattr(self, name, dict_to_add)
+
+    def _add_math(self, custom_math: list) -> AttrDict:
+        """
+        Load the base math and optionally override with custom math from a list of references to custom math files.
+
+        Args:
+            custom_math (list):
+                List of references to files containting custom mathematical formulations that will be merged with the base formulation.
+
+        Raises:
+            exceptions.ModelError:
+                Referenced internal custom math files or user-defined custom math files must exist.
+
+        Returns:
+            AttrDict: Dictionary of math (constraints, variables, objectives, and global expressions).
+        """
+
+        base_math = AttrDict.from_yaml(
+            os.path.join(os.path.dirname(calliope.__file__), "config", "base_math.yaml")
+        )
+
+        file_errors = []
+
+        for filename in custom_math:
+            if not f"{filename}".endswith((".yaml", ".yml")):
+                yaml_filepath = (
+                    Path(calliope.__file__).parent / "config" / f"{filename}.yaml"
+                )
+            else:
+                yaml_filepath = Path(relative_path(self._config_path, filename))
+
+            if not yaml_filepath.is_file():
+                file_errors.append(filename)
+                continue
+            else:
+                override_dict = AttrDict.from_yaml(yaml_filepath)
+
+            base_math.union(override_dict, allow_override=True)
+        if file_errors:
+            raise exceptions.ModelError(
+                f"Attempted to load custom math that does not exist: {file_errors}"
+            )
+        return base_math
+
+    def _generate_default_dict(self) -> AttrDict:
+        """Process input parameter default YAML configuration file into a dictionary of
+        defaults that match parameter names in the processed model dataset
+        (e.g., costs are prepended with `cost_`).
+
+        Returns:
+            AttrDict: Flat dictionary of `parameter_name`:`parameter_default` pairs.
+        """
+        raw_defaults = AttrDict.from_yaml(
+            os.path.join(os.path.dirname(calliope.__file__), "config", "defaults.yaml")
+        )
+        default_tech_dict = raw_defaults.techs.default_tech
+        default_cost_dict = {
+            "cost_{}".format(k): v
+            for k, v in default_tech_dict.costs.default_cost.items()
+        }
+        default_node_dict = {
+            "available_area": raw_defaults.nodes.default_node.available_area
+        }
+
+        return AttrDict(
+            {
+                **default_tech_dict.constraints.as_dict(),
+                **default_tech_dict.switches.as_dict(),
+                **default_cost_dict,
+                **default_node_dict,
+            }
+        )
+
+    def build(self, backend_interface: Literal["pyomo"] = "pyomo") -> None:
+        """Build description of the optimisation problem in the chosen backend interface.
+
+        Args:
+            backend_interface (Literal["pyomo"], optional):
+                Backend interface in which to build the problem. Defaults to "pyomo".
+        """
+        backend = self._BACKENDS[backend_interface]()
+        backend.add_all_parameters(self._model_data, self.run_config)
+        log_time(
+            logger,
+            self._timings,
+            "backend_parameters_generated",
+            comment="Model: Generated optimisation problem parameters",
+        )
+        # The order of adding components matters!
+        # 1. Variables, 2. Expressions, 3. Constraints, 4. Objectives
+        for components in ["variables", "expressions", "constraints", "objectives"]:
+            component = components.removesuffix("s")
+            for name, dict_ in self.math[components].items():
+                getattr(backend, f"add_{component}")(self._model_data, name, dict_)
+            log_time(
+                logger,
+                self._timings,
+                f"backend_{components}_generated",
+                comment=f"Model: Generated optimisation problem {components}",
+            )
+
+        self.backend = backend
+
+    def solve(self, force_rerun: bool = False, warmstart: bool = False) -> None:
+        """
+        Run the built optimisation problem.
+
+        Args:
+            force_rerun (bool, optional):
+                If ``force_rerun`` is True, any existing results will be overwritten.
+                Defaults to False.
+            warmstart (bool, optional):
+                If True and the optimisation problem has already been run in this session
+                (i.e., `force_rerun` is not True), the next optimisation will be run with
+                decision variables initially set to their previously optimal values.
+                If the optimisation problem is similar to the previous run, this can
+                decrease the solution time.
+                Warmstart will not work with some solvers (e.g., CBC, GLPK).
+                Defaults to False.
+
+        Raises:
+            exceptions.ModelError: Optimisation problem must already be built.
+            exceptions.ModelError: Cannot run the model if there are already results loaded, unless `force_rerun` is True.
+            exceptions.ModelError: Some preprocessing steps will stop a run mode of "operate" from being possible.
+        """
+        # Check that results exist and are non-empty
+        if not hasattr(self, "backend"):
+            raise exceptions.ModelError(
+                "You must build the optimisation problem (`.build()`) "
+                "before you can run it."
+            )
+
+        if hasattr(self, "results"):
+            if self.results.data_vars and not force_rerun:
+                raise exceptions.ModelError(
+                    "This model object already has results. "
+                    "Use model.run(force_rerun=True) to force"
+                    "the results to be overwritten with a new run."
+                )
+            else:
+                to_drop = self.results.data_vars
+        else:
+            to_drop = []
+
+        if (
+            self.run_config["mode"] == "operate"
+            and not self._model_data.attrs["allow_operate_mode"]
+        ):
+            raise exceptions.ModelError(
+                "Unable to run this model in operational mode, probably because "
+                "there exist non-uniform timesteps (e.g. from time masking)"
+            )
+
+        termination_condition = self.backend.solve(
+            solver=self.run_config["solver"],
+            solver_io=self.run_config.get("solver_io", None),
+            solver_options=self.run_config.get("solver_options", None),
+            save_logs=self.run_config.get("save_logs", None),
+            warmstart=warmstart,
+        )
+
+        # Add additional post-processed result variables to results
+        if termination_condition in ["optimal", "feasible"]:
+            results = self.backend.load_results()
+            results = postprocess_results.postprocess_model_results(
+                results, self._model_data, self._timings
+            )
+        else:
+            results = xr.Dataset()
+
+        self._model_data = self._model_data.drop_vars(to_drop)
+
+        self._model_data.attrs.update(results.attrs)
+        self._model_data.attrs["termination_condition"] = termination_condition
+        self._model_data = xr.merge(
+            [results, self._model_data], compat="override", combine_attrs="no_conflicts"
+        )
+        self._add_model_data_methods()
 
     def run(self, force_rerun=False, **kwargs):
         """
@@ -244,7 +462,7 @@ class Model(object):
         """
         warnings.warn(
             "get_formatted_array() is deprecated and will be removed in a "
-            "future version. Use `model.results.variable` instead.",
+            "future version. Use `model.results[var]` instead.",
             DeprecationWarning,
         )
         if var not in self._model_data.data_vars:

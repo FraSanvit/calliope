@@ -13,6 +13,7 @@ used for managing model configuration.
 import io
 from pathlib import Path
 import logging
+import copy
 
 import numpy as np
 import ruamel.yaml as ruamel_yaml
@@ -32,7 +33,7 @@ _MISSING = __Missing()
 
 def _yaml_load(src):
     """Load YAML from a file object or path with useful parser errors"""
-
+    yaml = ruamel_yaml.YAML(typ="safe")
     if not isinstance(src, str):
         try:
             src_name = src.name
@@ -44,7 +45,7 @@ def _yaml_load(src):
     else:
         src_name = "<yaml string>"
     try:
-        result = ruamel_yaml.safe_load(src)
+        result = yaml.load(src)
         if not isinstance(result, dict):
             raise ValueError("Could not parse {} as YAML".format(src_name))
         return result
@@ -82,6 +83,10 @@ class AttrDict(dict):
     def copy(self):
         """Override copy method so that it returns an AttrDict"""
         return AttrDict(self.as_dict().copy())
+
+    def __deepcopy__(self, memo):
+        """Override copy method so that it returns an AttrDict"""
+        return AttrDict(copy.deepcopy(self.as_dict(), memo))
 
     def init_from_dict(self, d):
         """

@@ -51,8 +51,10 @@ def check_error_or_warning(error_warning, test_string_or_strings):
         output = ",".join(
             str(error_warning.list[i]) for i in range(len(error_warning.list))
         )
-    else:
+    elif hasattr(error_warning, "value"):
         output = str(error_warning.value)
+    elif isinstance(error_warning, (list, set)):
+        output = ",".join(error_warning)
 
     if isinstance(test_string_or_strings, list):
         result = all(test_string in output for test_string in test_string_or_strings)
@@ -72,25 +74,23 @@ def check_variable_exists(backend_model, constraint, variable, idx=None):
     constraint : str, name of constraint which could exist in the backend
     variable : str, string to search in the list of variables to check if existing
     """
-    if getattr(backend_model, constraint) in backend_model.component_objects(
-        ctype=po.Constraint
-    ):
-        expression_accessor = "body"
-    elif getattr(backend_model, constraint) in backend_model.component_objects(
-        ctype=po.Expression
-    ):
-        expression_accessor = "value"
+
+    def _get_body(pyomo_parent_obj, pyomo_child_obj):
+        if pyomo_parent_obj in backend_model.component_objects(ctype=po.Constraint):
+            return pyomo_child_obj.body
+        else:
+            return pyomo_child_obj
+
+    pyomo_obj = getattr(backend_model, constraint)
     if idx is not None:
-        if idx in getattr(backend_model, constraint)._index:
-            variables = identify_variables(
-                getattr(getattr(backend_model, constraint)[idx], expression_accessor)
-            )
+        if idx in pyomo_obj.index_set():
+            variables = identify_variables(_get_body(pyomo_obj, pyomo_obj[idx]))
             return any(variable in j.getname() for j in list(variables))
         else:
             return False
     else:
         exists = []
-        for v in getattr(backend_model, constraint).values():
-            variables = identify_variables(getattr(v, expression_accessor))
+        for v in pyomo_obj.values():
+            variables = identify_variables(_get_body(pyomo_obj, v))
             exists.append(any(variable in j.getname() for j in list(variables)))
         return any(exists)

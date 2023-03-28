@@ -35,43 +35,56 @@ class TestModelPreproccessing:
 
 
 class TestNationalScaleExampleModelSenseChecks:
-    def example_tester(self, solver="cbc", solver_io=None):
-        override = {
-            "model.subset_time": ["2005-01-01", "2005-01-01"],
-            "run.solver": solver,
-        }
+    def example_tester(self, solver="cbc", solver_io=None, backend_runner="run"):
+        model = calliope.examples.national_scale(
+            override_dict={"model.subset_time": ["2005-01-01", "2005-01-01"]}
+        )
 
-        if solver_io:
-            override["run.solver_io"] = solver_io
+        model.run_config["solver"] = solver
+        model.run_config["solver_io"] = solver_io
 
-        model = calliope.examples.national_scale(override_dict=override)
-        model.run()
+        if backend_runner == "run":
+            model.run()
+        elif backend_runner == "solve":
+            model.build()
+            model.solve()
 
-        assert model.results.storage_cap.loc["region1-1", "csp"] == approx(45129.950)
-        assert model.results.storage_cap.loc["region2", "battery"] == approx(6675.173)
+        assert model.results.storage_cap.sel(nodes="region1-1", techs="csp") == approx(
+            45129.950
+        )
+        assert model.results.storage_cap.sel(
+            nodes="region2", techs="battery"
+        ) == approx(6675.173)
 
-        assert model.results.energy_cap.loc["region1-1", "csp"] == approx(4626.588)
-        assert model.results.energy_cap.loc["region2", "battery"] == approx(1000)
-        assert model.results.energy_cap.loc["region1", "ccgt"] == approx(30000)
+        assert model.results.energy_cap.sel(nodes="region1-1", techs="csp") == approx(
+            4626.588
+        )
+        assert model.results.energy_cap.sel(nodes="region2", techs="battery") == approx(
+            1000
+        )
+        assert model.results.energy_cap.sel(nodes="region1", techs="ccgt") == approx(
+            30000
+        )
 
         assert float(model.results.cost.sum()) == approx(38988.7442)
 
         assert float(
-            model.results.systemwide_levelised_cost.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
+            model.results.systemwide_levelised_cost.sel(
+                carriers="power", techs="battery"
+            ).item()
         ) == approx(0.063543, abs=0.000001)
         assert float(
-            model.results.systemwide_capacity_factor.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
+            model.results.systemwide_capacity_factor.sel(
+                carriers="power", techs="battery"
+            ).item()
         ) == approx(0.2642256, abs=0.000001)
 
-    def test_nationalscale_example_results_cbc(self):
-        self.example_tester()
+    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
+    def test_nationalscale_example_results_cbc(self, backend_runner):
+        self.example_tester(backend_runner=backend_runner)
 
-    @pytest.importorskip("gurobipy")
     def test_nationalscale_example_results_gurobi(self):
+        pytest.importorskip("gurobipy")
         self.example_tester(solver="gurobi", solver_io="python")
 
     def test_nationalscale_example_results_cplex(self):
@@ -108,7 +121,6 @@ class TestNationalScaleExampleModelSenseChecks:
 
 class TestNationalScaleExampleModelInfeasibility:
     def example_tester(self):
-
         model = calliope.examples.national_scale(
             scenario="check_feasibility", override_dict={"run.cyclic_storage": False}
         )
@@ -149,10 +161,11 @@ class TestNationalScaleExampleModelOperate:
         self.example_tester()
 
 
-@pytest.mark.xfail(reason="SPORES mode will fail until the cost max group constraint can be reproduced")
+@pytest.mark.skip(
+    reason="SPORES mode will fail until the cost max group constraint can be reproduced"
+)
 class TestNationalScaleExampleModelSpores:
     def example_tester(self, solver="cbc", solver_io=None):
-
         model = calliope.examples.national_scale(
             override_dict={
                 "model.subset_time": ["2005-01-01", "2005-01-03"],
@@ -198,10 +211,15 @@ class TestNationalScaleExampleModelSpores:
     @pytest.mark.filterwarnings(
         "ignore:(?s).*`gurobi_persistent`.*:calliope.exceptions.ModelWarning"
     )
-    @pytest.importorskip("gurobipy")
+    @pytest.mark.filterwarnings(
+        "ignore:(?s).*Updating the Pyomo parameter.*:calliope.exceptions.ModelWarning"
+    )
     def test_nationalscale_example_results_gurobi(self):
-        gurobi_data = self.example_tester("gurobi", "python")
-        gurobi_persistent_data = self.example_tester("gurobi_persistent", "python")
+        pytest.importorskip("gurobipy")
+        gurobi_data = self.example_tester(solver="gurobi", solver_io="python")
+        gurobi_persistent_data = self.example_tester(
+            solver="gurobi_persistent", solver_io="python"
+        )
         assert np.allclose(gurobi_data.energy_cap, gurobi_persistent_data.energy_cap)
         assert np.allclose(gurobi_data.cost, gurobi_persistent_data.cost)
 
@@ -245,9 +263,88 @@ class TestNationalScaleExampleModelSpores:
             excinfo, "Cannot run SPORES with a SPORES dimension in any input"
         )
 
+    @pytest.fixture
+    def spores_with_override(self):
+        def _spores_with_override(override_dict):
+            result_without_override = self.example_tester()
+            result_with_override = self.example_tester(**override_dict)
+            assert result_without_override.energy_cap.round(5).equals(
+                result_with_override.energy_cap.round(5)
+            )
+            assert (
+                result_without_override.cost.sel(costs="spores_score")
+                .round(5)
+                .to_series()
+                .drop("region1::ccgt", level="loc_techs_cost")
+                .equals(
+                    result_with_override.cost.sel(costs="spores_score")
+                    .round(5)
+                    .to_series()
+                    .drop("region1::ccgt", level="loc_techs_cost")
+                )
+            )
+            assert (
+                result_without_override.cost.sel(
+                    costs="spores_score", loc_techs_cost="region1::ccgt"
+                ).sum()
+                > 0
+            )
+            return result_with_override, result_without_override
+
+        return _spores_with_override
+
+    @pytest.mark.parametrize("override", ("energy_cap_min", "energy_cap_equals"))
+    def test_ignore_forced_energy_cap_spores(self, spores_with_override, override):
+        # the national scale model always maxes out CCGT in the first 3 SPORES.
+        # So we can force its minimum/exact capacity without influencing other tech SPORE scores.
+        # This enables us to test our functionality that only *additional* capacity is scored.
+        override_dict = {f"locations.region1.techs.ccgt.constraints.{override}": 30000}
+        result_with_override, _ = spores_with_override(override_dict)
+        assert (
+            result_with_override.cost.sel(
+                costs="spores_score", loc_techs_cost="region1::ccgt"
+            ).sum()
+            == 0
+        )
+
+    def test_ignore_forced_energy_cap_spores_some_ccgt_score(
+        self, spores_with_override
+    ):
+        # the national scale model always maxes out CCGT in the first 3 SPORES.
+        # So we can force its minimum/exact capacity without influencing other tech SPORE scores.
+        # This enables us to test our functionality that only *additional* capacity is scored.
+        override_dict = {
+            f"locations.region1.techs.ccgt.constraints.energy_cap_min": 15000
+        }
+        result_with_override, _ = spores_with_override(override_dict)
+        assert (
+            result_with_override.cost.sel(
+                costs="spores_score", loc_techs_cost="region1::ccgt"
+            ).sum()
+            > 0
+        )
+
+    def test_ignore_forced_energy_cap_spores_no_double_counting(
+        self, spores_with_override
+    ):
+        # the national scale model always maxes out CCGT in the first 3 SPORES.
+        # So we can force its minimum/exact capacity without influencing other tech SPORE scores.
+        # This enables us to test our functionality that only *additional* capacity is scored.
+        override_dict = {
+            f"locations.region1.techs.ccgt.constraints.energy_cap_min": 15000,
+            f"locations.region1.techs.ccgt.constraints.energy_cap_equals": 30000,
+        }
+        result_with_override, _ = spores_with_override(override_dict)
+        assert (
+            result_with_override.cost.sel(
+                costs="spores_score", loc_techs_cost="region1::ccgt"
+            ).sum()
+            == 0
+        )
+
 
 class TestNationalScaleResampledExampleModelSenseChecks:
-    def example_tester(self, solver="cbc", solver_io=None):
+    def example_tester(self, solver="cbc", solver_io=None, backend_runner="run"):
         override = {
             "model.subset_time": ["2005-01-01", "2005-01-01"],
             "run.solver": solver,
@@ -257,22 +354,26 @@ class TestNationalScaleResampledExampleModelSenseChecks:
             override["run.solver_io"] = solver_io
 
         model = calliope.examples.time_resampling(override_dict=override)
-        model.run()
+        if backend_runner == "run":
+            model.run()
+        elif backend_runner == "solve":
+            model.build()
+            model.solve()
 
-        assert model.results.storage_cap.to_series()[("region1-1", "csp")] == approx(
+        assert model.results.storage_cap.sel(nodes="region1-1", techs="csp") == approx(
             23563.444
         )
-        assert model.results.storage_cap.to_series()[("region2", "battery")] == approx(
-            6315.78947
-        )
+        assert model.results.storage_cap.sel(
+            nodes="region2", techs="battery"
+        ) == approx(6315.78947)
 
-        assert model.results.energy_cap.to_series()[("region1-1", "csp")] == approx(
+        assert model.results.energy_cap.sel(nodes="region1-1", techs="csp") == approx(
             1440.8377
         )
-        assert model.results.energy_cap.to_series()[("region2", "battery")] == approx(
+        assert model.results.energy_cap.sel(nodes="region2", techs="battery") == approx(
             1000
         )
-        assert model.results.energy_cap.to_series()[("region1", "ccgt")] == approx(
+        assert model.results.energy_cap.sel(nodes="region1", techs="ccgt") == approx(
             30000
         )
 
@@ -289,8 +390,9 @@ class TestNationalScaleResampledExampleModelSenseChecks:
             ].item()
         ) == approx(0.25, abs=0.000001)
 
-    def test_nationalscale_resampled_example_results_cbc(self):
-        self.example_tester()
+    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
+    def test_nationalscale_example_results_cbc(self, backend_runner):
+        self.example_tester(backend_runner=backend_runner)
 
     def test_nationalscale_resampled_example_results_glpk(self):
         if shutil.which("glpsol"):
@@ -302,6 +404,9 @@ class TestNationalScaleResampledExampleModelSenseChecks:
 class TestNationalScaleClusteredExampleModelSenseChecks:
     def model_runner(
         self,
+        expected_total_cost=None,
+        expected_levelised_cost=None,
+        expected_capacity_factor=None,
         solver="cbc",
         solver_io=None,
         how="closest",
@@ -324,121 +429,89 @@ class TestNationalScaleClusteredExampleModelSenseChecks:
             override["run.solver_io"] = solver_io
 
         model = calliope.examples.time_clustering(override_dict=override)
+        timesteps = model._model_data.timesteps.copy(deep=True)
+
         model.run()
 
-        return model
+        # make sure the dimension items have not been accidentally reordered
+        assert timesteps.equals(model._model_data.timesteps)
+
+        if expected_total_cost is not None:
+            # Full 1-hourly model run: 22389323.5 with cyclic storage, 22389455.6 without
+            assert float(model.results.cost.sum()) == approx(expected_total_cost)
+
+        if expected_levelised_cost is not None:
+            # Full 1-hourly model run: 0.316745 with cyclic storage, 0.316745 without
+            assert float(
+                model.results.systemwide_levelised_cost.loc[
+                    {"carriers": "power", "techs": "battery"}
+                ].item()
+            ) == approx(expected_levelised_cost, abs=0.000001)
+
+        if expected_capacity_factor is not None:
+            # Full 1-hourly model run: 0.067998 with cycling storage, 0.067998 without
+            assert float(
+                model.results.systemwide_capacity_factor.loc[
+                    {"carriers": "power", "techs": "battery"}
+                ].item()
+            ) == approx(expected_capacity_factor, abs=0.000001)
+
+        return None
 
     def example_tester_closest(self, solver="cbc", solver_io=None):
-        model = self.model_runner(solver=solver, solver_io=solver_io, how="closest")
-        # Full 1-hourly model run: 22312488.670967
-        assert float(model.results.cost.sum()) == approx(49670627.15297682)
-
-        # Full 1-hourly model run: 0.296973
-        assert float(
-            model.results.systemwide_levelised_cost.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
-        ) == approx(0.137105, abs=0.000001)
-
-        # Full 1-hourly model run: 0.064362
-        assert float(
-            model.results.systemwide_capacity_factor.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
-        ) == approx(0.064501, abs=0.000001)
+        self.model_runner(
+            solver=solver,
+            expected_total_cost=51711873.177,  # was 49670627.15297682 when clustering with sklearn < v0.24
+            expected_levelised_cost=0.111456,  # was 0.137105 when clustering with sklearn < v0.24
+            expected_capacity_factor=0.074809,  # was 0.064501 when clustering with sklearn < v0.24
+            solver_io=solver_io,
+            how="closest",
+        )
 
     def example_tester_mean(self, solver="cbc", solver_io=None):
-        model = self.model_runner(solver=solver, solver_io=solver_io, how="mean")
-        # Full 1-hourly model run: 22312488.670967
-        assert float(model.results.cost.sum()) == approx(22172253.328)
-
-        # Full 1-hourly model run: 0.296973
-        assert float(
-            model.results.systemwide_levelised_cost.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
-        ) == approx(0.127783, abs=0.000001)
-
-        # Full 1-hourly model run: 0.064362
-        assert float(
-            model.results.systemwide_capacity_factor.loc[dict(carriers="power")]
-            .to_series()
-            .T["battery"]
-        ) == approx(0.044458, abs=0.000001)
+        self.model_runner(
+            solver=solver,
+            expected_total_cost=45110416.434,  # was 22172253.328 when clustering with sklearn < v0.24
+            expected_levelised_cost=0.126098,  # was 0.127783 when clustering with sklearn < v0.24
+            expected_capacity_factor=0.047596,  # was 0.044458 when clustering with sklearn < v0.24
+            solver_io=solver_io,
+            how="mean",
+        )
 
     def example_tester_storage_inter_cluster(self):
-        model = self.model_runner(storage_inter_cluster=True)
+        self.model_runner(
+            expected_total_cost=33353390.626,  # was 21825515.304 when clustering with sklearn < v0.24
+            expected_levelised_cost=0.115866,  # was 0.100760 when clustering with sklearn < v0.24
+            expected_capacity_factor=0.074167,  # was 0.091036 when clustering with sklearn < v0.24
+            storage_inter_cluster=True,
+        )
 
-        # Full 1-hourly model run: 22312488.670967
-        assert float(model.results.cost.sum()) == approx(21825515.304)
-
-        # Full 1-hourly model run: 0.296973
-        assert float(
-            model.results.systemwide_levelised_cost.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
-        ) == approx(0.100760, abs=0.000001)
-
-        # Full 1-hourly model run: 0.064362
-        assert float(
-            model.results.systemwide_capacity_factor.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
-        ) == approx(0.091036, abs=0.000001)
-
-    # @pytest.mark.xfail(reason="Anything to do with clusters is probably badly broken in myriad ways")
     def test_nationalscale_clustered_example_closest_results_cbc(self):
         self.example_tester_closest()
-
-    # @pytest.mark.xfail(reason="Anything to do with clusters is probably badly broken in myriad ways")
-    def test_nationalscale_clustered_example_closest_results_glpk(self):
-        if shutil.which("glpsol"):
-            self.example_tester_closest(solver="glpk")
-        else:
-            pytest.skip("GLPK not installed")
 
     def test_nationalscale_clustered_example_mean_results_cbc(self):
         self.example_tester_mean()
 
-    @pytest.mark.skip(
-        reason="GLPK is useless and delivering different results on different operating systems"
-    )
-    def test_nationalscale_clustered_example_mean_results_glpk(self):
-        if shutil.which("glpsol"):
-            self.example_tester_mean(solver="glpk")
-        else:
-            pytest.skip("GLPK not installed")
-
     @pytest.mark.xfail(
-        reason="Inter-cluster things are probably badly broken in myriad ways"
+        reason="New implementation of constraint subsets does't allow for negative values of storage_cap, which is needed for inter cluster storage"
     )
     def test_nationalscale_clustered_example_storage_inter_cluster(self):
         self.example_tester_storage_inter_cluster()
 
     @pytest.mark.xfail(
-        reason="Inter-cluster things are probably badly broken in myriad ways"
+        reason="New implementation of constraint subsets does't allow for negative values of storage_cap, which is needed for inter cluster storage"
     )
     def test_storage_inter_cluster_cyclic(self):
-        model = self.model_runner(storage_inter_cluster=True, cyclic=True)
-        # Full 1-hourly model run: 22312488.670967
-        assert float(model.results.cost.sum()) == approx(18904055.722)
-
-        # Full 1-hourly model run: 0.296973
-        assert float(
-            model.results.systemwide_levelised_cost.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
-        ) == approx(0.122564, abs=0.000001)
-
-        # Full 1-hourly model run: 0.064362
-        assert float(
-            model.results.systemwide_capacity_factor.loc[
-                {"carriers": "power", "techs": "battery"}
-            ].item()
-        ) == approx(0.075145, abs=0.000001)
+        self.model_runner(
+            expected_total_cost=18838244.197,  # was 18904055.722 when clustering with sklearn < v0.24
+            expected_levelised_cost=0.133110,  # was 0.122564 when clustering with sklearn < v0.24
+            expected_capacity_factor=0.071411,  # was 0.075145 when clustering with sklearn < v0.24
+            storage_inter_cluster=True,
+            cyclic=True,
+        )
 
     @pytest.mark.xfail(
-        reason="Inter-cluster things are probably badly broken in myriad ways"
+        reason="New implementation of constraint subsets does't allow for negative values of storage_cap, which is needed for inter cluster storage"
     )
     def test_storage_inter_cluster_no_storage(self):
         with pytest.warns(calliope.exceptions.ModelWarning) as excinfo:
@@ -452,7 +525,9 @@ class TestNationalScaleClusteredExampleModelSenseChecks:
 
 
 class TestUrbanScaleExampleModelSenseChecks:
-    def example_tester(self, resource_unit, solver="cbc", solver_io=None):
+    def example_tester(
+        self, resource_unit, solver="cbc", solver_io=None, backend_runner="run"
+    ):
         unit_override = {
             "techs.pv.constraints.resource": "file=pv_resource.csv:{}".format(
                 resource_unit
@@ -466,9 +541,16 @@ class TestUrbanScaleExampleModelSenseChecks:
             override["run.solver_io"] = solver_io
 
         model = calliope.examples.urban_scale(override_dict=override)
-        model.run()
 
-        assert model.results.energy_cap.to_series()[("X1", "chp")] == approx(250.090112)
+        if backend_runner == "run":
+            model.run()
+        elif backend_runner == "solve":
+            model.build()
+            model.solve()
+
+        assert model.results.energy_cap.sel(nodes="X1", techs="chp") == approx(
+            250.090112
+        )
 
         # GLPK isn't able to get the same answer both times, so we have to account for that here
         if resource_unit == "per_cap" and solver == "glpk":
@@ -476,14 +558,14 @@ class TestUrbanScaleExampleModelSenseChecks:
         else:
             heat_pipe_approx = 182.19260
 
-        assert model.results.energy_cap.to_series()[("X2", "heat_pipes:N1")] == approx(
-            heat_pipe_approx
-        )
+        assert model.results.energy_cap.sel(
+            nodes="X2", techs="heat_pipes:N1"
+        ) == approx(heat_pipe_approx)
 
-        assert model.results.carrier_prod.sum("timesteps").to_series()[
-            ("heat", "X3", "boiler")
-        ] == approx(0.18720)
-        assert model.results.resource_area.to_series()[("X2", "pv")] == approx(
+        assert model.results.carrier_prod.sum("timesteps").sel(
+            carriers="heat", nodes="X3", techs="boiler"
+        ) == approx(0.18720)
+        assert model.results.resource_area.sel(nodes="X2", techs="pv") == approx(
             830.064659
         )
 
@@ -493,42 +575,49 @@ class TestUrbanScaleExampleModelSenseChecks:
         cost_sum = 430.097399 if solver == "glpk" else 430.089188
         assert float(model.results.cost.sum()) == approx(cost_sum)
 
-    def test_urban_example_results_area(self):
-        self.example_tester("per_area")
+    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
+    def test_urban_example_results_area(self, backend_runner):
+        self.example_tester("per_area", backend_runner=backend_runner)
 
-    @pytest.importorskip("gurobipy")
     def test_urban_example_results_area_gurobi(self):
+        gurobi = pytest.importorskip("gurobipy")
         self.example_tester("per_area", solver="gurobi", solver_io="python")
 
-    def test_urban_example_results_cap(self):
-        self.example_tester("per_cap")
+    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
+    def test_urban_example_results_cap(self, backend_runner):
+        self.example_tester("per_cap", backend_runner=backend_runner)
 
-    @pytest.importorskip("gurobipy")
     def test_urban_example_results_cap_gurobi(self):
+        gurobi = pytest.importorskip("gurobipy")
         self.example_tester("per_cap", solver="gurobi", solver_io="python")
 
     @pytest.mark.filterwarnings("ignore:(?s).*Integer:calliope.exceptions.ModelWarning")
-    def test_milp_example_results(self):
+    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
+    def test_milp_example_results(self, backend_runner):
         model = calliope.examples.milp(
             override_dict={
                 "model.subset_time": ["2005-01-01", "2005-01-01"],
                 "run.solver_options.mipgap": 0.001,
             }
         )
-        model.run()
+        if backend_runner == "run":
+            model.run()
+        elif backend_runner == "solve":
+            model.build()
+            model.solve()
 
-        assert model.results.energy_cap.to_series()[("X1", "chp")] == 300
-        assert model.results.energy_cap.to_series()[("X2", "heat_pipes:N1")] == approx(
-            188.363137
-        )
+        assert model.results.energy_cap.sel(nodes="X1", techs="chp") == 300
+        assert model.results.energy_cap.sel(
+            nodes="X2", techs="heat_pipes:N1"
+        ) == approx(188.363137)
 
-        assert model.results.carrier_prod.sum("timesteps").to_series()[
-            ("gas", "X1", "supply_gas")
-        ] == approx(12363.173036)
+        assert model.results.carrier_prod.sum("timesteps").sel(
+            carriers="gas", nodes="X1", techs="supply_gas"
+        ) == approx(12363.173036)
         assert float(model.results.carrier_export.sum()) == approx(0)
 
-        assert model.results.purchased.to_series()[("X2", "boiler")] == 1
-        assert model.results.units.to_series()[("X1", "chp")] == 1
+        assert model.results.purchased.sel(nodes="X2", techs="boiler") == 1
+        assert model.results.units.sel(nodes="X1", techs="chp") == 1
 
         assert float(model.results.operating_units.sum()) == 24
 

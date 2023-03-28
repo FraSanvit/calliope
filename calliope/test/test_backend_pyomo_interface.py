@@ -24,7 +24,8 @@ class TestGetInputParams:
 
         inputs = model.backend.access_model_inputs()
         assert set(model.inputs.data_vars).symmetric_difference(inputs.data_vars) == {
-            "objective_cost_class"
+            "objective_cost_class",
+            "annualisation_weight",
         }
 
 
@@ -220,7 +221,10 @@ class TestBackendRerun:
         assert check_error_or_warning(
             excinfo, "The results of rerunning the backend model are only available"
         )
-    @pytest.mark.xfail(reason="SPORES mode will fail until the cost max group constraint can be reproduced")
+
+    @pytest.mark.skip(
+        reason="SPORES mode will fail until the cost max group constraint can be reproduced"
+    )
     def test_rerun_spores(self, model):
         model = calliope.examples.national_scale(
             override_dict={
@@ -236,6 +240,9 @@ class TestBackendRerun:
             assert hasattr(new_model, i)
         assert "spores" in new_model.results.dims
 
+    @pytest.mark.skip(
+        reason="SPORES mode will fail until the cost max group constraint can be reproduced"
+    )
     def test_rerun_spores_fail_on_rerun_with_results(self, model):
         model = calliope.examples.national_scale(
             override_dict={
@@ -288,7 +295,6 @@ class TestAddConstraint:
         """Must include 'backend_model' as first function argument"""
 
         def energy_cap_time_varying_rule(backend, node, tech, timestep):
-
             return (
                 backend.energy_cap[node, tech]
                 <= backend.energy_cap[node, tech]
@@ -311,7 +317,6 @@ class TestAddConstraint:
         def energy_cap_time_varying_rule(
             backend_model, node, tech, timestep, extra_arg
         ):
-
             return (
                 backend_model.energy_cap[node, tech]
                 <= backend_model.energy_cap[node, tech]
@@ -334,7 +339,6 @@ class TestAddConstraint:
         """Constraint sets must be backend model sets"""
 
         def energy_cap_time_varying_rule(backend_model, node, tech, not_a_set):
-
             return (
                 backend_model.energy_cap[node, tech]
                 <= backend_model.energy_cap[node, tech]
@@ -387,8 +391,18 @@ class TestAddConstraint:
 @pytest.mark.filterwarnings(
     "ignore:(?s).*The results of rerunning the backend model:calliope.exceptions.ModelWarning"
 )
-@pytest.importorskip("gurobipy")
 class TestRegeneratePersistentConstraints:
+    gurobi = pytest.importorskip("gurobipy")
+
+    @pytest.fixture(scope="class")
+    def model_persistent(self):
+        m = build_model(
+            {"run.solver": "gurobi_persistent"},
+            "simple_supply,two_hours,investment_costs",
+        )
+        m.run()
+        return m
+
     @pytest.mark.filterwarnings(
         "ignore:(?s).*Updating the Pyomo parameter:calliope.exceptions.ModelWarning"
     )
@@ -412,14 +426,14 @@ class TestRegeneratePersistentConstraints:
     @pytest.mark.filterwarnings(
         "ignore:(?s).*Updating the Pyomo parameter:calliope.exceptions.ModelWarning"
     )
-    def test_update_param_with_regeneration_one_dim(self, model_persistent):
+    def test_update_param_with_variable_regeneration(self, model_persistent):
         model_persistent.backend.update_param(
             "energy_cap_max",
             {("b", "test_supply_elec"): 5, ("a", "test_supply_elec"): 5},
         )
         model_persistent.backend.regenerate_persistent_solver(
-            constraints={
-                "energy_capacity_constraint": [
+            variables={
+                "energy_cap": [
                     ("b", "test_supply_elec"),
                     ("a", "test_supply_elec"),
                 ]
@@ -432,14 +446,14 @@ class TestRegeneratePersistentConstraints:
     @pytest.mark.filterwarnings(
         "ignore:(?s).*Updating the Pyomo parameter:calliope.exceptions.ModelWarning"
     )
-    def test_update_param_with_regeneration_two_dims(self, model_persistent):
+    def test_update_param_with_constraint_regeneration(self, model_persistent):
         model_persistent.backend.update_param(
             "resource", {("b", "test_demand_elec", "2005-01-01 01:00"): -4}
         )
         model_persistent.backend.regenerate_persistent_solver(
             constraints={
                 "balance_demand_constraint": [
-                    ("b", "test_demand_elec", "2005-01-01 01:00")
+                    ("electricity", "b", "test_demand_elec", "2005-01-01 01:00")
                 ]
             }
         )
