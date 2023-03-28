@@ -231,3 +231,9 @@ def string_to_datetime(
                 pd.to_datetime, model_data[set_name], keep_attrs=True
             )
     return model_data
+
+def split_comma_list(comma_list):
+    """
+    Take a comma deliminated string and split it into a list of strings
+    """
+    return comma_list.split(",")
