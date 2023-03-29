@@ -14,6 +14,94 @@ import pyomo.core as po
 
 from calliope.backend.pyomo.util import get_param, get_previous_timestep
 
+def load_constraints(backend_model):
+    sets = backend_model.__calliope_model_data["sets"]
+
+    if "loc_tech_carriers_carrier_production_max_constraint" in sets:
+        backend_model.carrier_production_max_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_carrier_production_max_constraint,
+            backend_model.timesteps,
+            rule=carrier_production_max_constraint_rule,
+        )
+    if "loc_tech_carriers_carrier_production_min_constraint" in sets:
+        backend_model.carrier_production_min_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_carrier_production_min_constraint,
+            backend_model.timesteps,
+            rule=carrier_production_min_constraint_rule,
+        )
+    if "loc_tech_carriers_carrier_consumption_max_constraint" in sets:
+        backend_model.carrier_consumption_max_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_carrier_consumption_max_constraint,
+            backend_model.timesteps,
+            rule=carrier_consumption_max_constraint_rule,
+        )
+
+    if "loc_techs_resource_max_constraint" in sets:
+        backend_model.resource_max_constraint = po.Constraint(
+            backend_model.loc_techs_resource_max_constraint,
+            backend_model.timesteps,
+            rule=resource_max_constraint_rule,
+        )
+
+    if "loc_techs_storage_max_constraint" in sets:
+        backend_model.storage_max_constraint = po.Constraint(
+            backend_model.loc_techs_storage_max_constraint,
+            backend_model.timesteps,
+            rule=storage_max_constraint_rule,
+        )
+
+    if "loc_techs_storage_discharge_depth" in sets:
+        backend_model.storage_discharge_depth_constraint = po.Constraint(
+            backend_model.loc_techs_storage_discharge_depth,
+            backend_model.timesteps,
+            rule=storage_discharge_depth_constraint_rule,
+        )
+
+    if "loc_techs_storage_charge_depth" in sets:
+        backend_model.storage_charge_depth_constraint = po.Constraint(
+        backend_model.loc_techs_storage_charge_depth,
+        backend_model.timesteps,
+        rule=storage_charge_depth_constraint_rule,
+    )
+
+    if "loc_tech_carriers_ramping_constraint" in sets:
+        backend_model.ramping_up_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_ramping_constraint,
+            backend_model.timesteps,
+            rule=ramping_up_constraint_rule,
+        )
+
+        backend_model.ramping_down_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_ramping_constraint,
+            backend_model.timesteps,
+            rule=ramping_down_constraint_rule,
+        )
+
+    if "loc_techs_storage_intra_max_constraint" in sets:
+        backend_model.storage_intra_max_constraint = po.Constraint(
+            backend_model.loc_techs_storage_intra_max_constraint,
+            backend_model.timesteps,
+            rule=storage_intra_max_rule,
+        )
+    if "loc_techs_storage_intra_min_constraint" in sets:
+        backend_model.storage_intra_min_constraint = po.Constraint(
+            backend_model.loc_techs_storage_intra_min_constraint,
+            backend_model.timesteps,
+            rule=storage_intra_min_rule,
+        )
+    if "loc_techs_storage_inter_max_constraint" in sets:
+        backend_model.storage_inter_max_constraint = po.Constraint(
+            backend_model.loc_techs_storage_inter_max_constraint,
+            backend_model.datesteps,
+            rule=storage_inter_max_rule,
+        )
+    if "loc_techs_storage_inter_min_constraint" in sets:
+        backend_model.storage_inter_min_constraint = po.Constraint(
+            backend_model.loc_techs_storage_inter_min_constraint,
+            backend_model.datesteps,
+            rule=storage_inter_min_rule,
+        )
+
 
 def carrier_production_max_constraint_rule(
     backend_model, carrier, node, tech, timestep
