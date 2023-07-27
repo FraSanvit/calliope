@@ -1,14 +1,14 @@
+import ast
 import os
 import sys
-import ast
+from pathlib import Path
+from typing import Literal, Optional, Union
 
 import pytest
-from pyomo.core.expr.current import identify_variables
-import pyomo.core as po
+import xarray as xr
 
 import calliope
 from calliope import AttrDict
-
 
 constraint_sets = {
     k: [ast.literal_eval(i) for i in v]
@@ -21,10 +21,6 @@ constraint_sets = {
 
 defaults = AttrDict.from_yaml(
     os.path.join(os.path.dirname(calliope.__file__), "config", "defaults.yaml")
-)
-
-subsets_config = AttrDict.from_yaml(
-    os.path.join(os.path.dirname(calliope.__file__), "config", "subsets.yaml")
 )
 
 python36_or_higher = pytest.mark.skipif(
@@ -64,33 +60,80 @@ def check_error_or_warning(error_warning, test_string_or_strings):
     return result
 
 
-def check_variable_exists(backend_model, constraint, variable, idx=None):
+def check_variable_exists(
+    expr_or_constr: Optional[xr.DataArray], variable: str, idx: Optional[dict] = None
+):
     """
     Search for existence of a decision variable in a Pyomo constraint.
 
     Parameters
     ----------
-    backend_model : Pyomo ConcreteModel
+    backend_interface : solver interface library
     constraint : str, name of constraint which could exist in the backend
     variable : str, string to search in the list of variables to check if existing
     """
+    if expr_or_constr is None:
+        return False
 
-    def _get_body(pyomo_parent_obj, pyomo_child_obj):
-        if pyomo_parent_obj in backend_model.component_objects(ctype=po.Constraint):
-            return pyomo_child_obj.body
-        else:
-            return pyomo_child_obj
+    try:
+        var_exists = expr_or_constr.body.astype(str).str.find(variable) > -1
+    except (AttributeError, KeyError):
+        var_exists = expr_or_constr.astype(str).str.find(variable) > -1
 
-    pyomo_obj = getattr(backend_model, constraint)
     if idx is not None:
-        if idx in pyomo_obj.index_set():
-            variables = identify_variables(_get_body(pyomo_obj, pyomo_obj[idx]))
-            return any(variable in j.getname() for j in list(variables))
-        else:
-            return False
-    else:
-        exists = []
-        for v in pyomo_obj.values():
-            variables = identify_variables(_get_body(pyomo_obj, v))
-            exists.append(any(variable in j.getname() for j in list(variables)))
-        return any(exists)
+        var_exists = var_exists.loc[idx]
+
+    return var_exists.any()
+
+
+def build_lp(
+    model: calliope.Model,
+    outfile: Union[str, Path],
+    math: Optional[dict] = None,
+    backend: Literal["pyomo"] = "pyomo",
+) -> None:
+    """
+    Write a barebones LP file with which to compare in tests.
+    All model parameters and variables will be loaded automatically, as well as a dummy objective if one isn't provided as part of `math`.
+    Everything else to be added to the LP file must be defined in `math`.
+
+    Args:
+        model (calliope.Model): Calliope model.
+        outfile (Union[str, Path]): Path to LP file.
+        math (Optional[dict], optional): All constraint/global expression/objective math to apply. Defaults to None.
+        backend (Literal["pyomo"], optional): Backend to use to create the LP file. Defaults to "pyomo".
+    """
+    backend_instance = model._BACKENDS[backend]()
+    backend_instance.add_all_parameters(model.inputs, model.run_config)
+    for name, dict_ in model.math["variables"].items():
+        backend_instance.add_variable(model.inputs, name, dict_)
+
+    if math is not None:
+        for component_group, component_math in math.items():
+            for name, dict_ in component_math.items():
+                getattr(backend_instance, f"add_{component_group.removesuffix('s')}")(
+                    model.inputs, name, dict_
+                )
+
+    # MUST have an objective for a valid LP file
+    if math is None or "objectives" not in math.keys():
+        backend_instance.add_objective(
+            model.inputs,
+            "dummy_obj",
+            {"equations": [{"expression": "1 + 1"}], "sense": "minimize"},
+        )
+    backend_instance._instance.objectives[0].activate()
+
+    backend_instance.verbose_strings()
+
+    backend_instance.to_lp(str(outfile))
+
+    # strip trailing whitespace from `outfile` after the fact,
+    # so it can be reliably compared other files in future
+    with Path(outfile).open("r") as f:
+        stripped_lines = []
+        while line := f.readline():
+            stripped_lines.append(line.rstrip())
+
+    # reintroduce the trailing newline since both Pyomo and file formatters love them.
+    Path(outfile).write_text("\n".join(stripped_lines) + "\n")

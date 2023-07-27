@@ -1,12 +1,12 @@
-import pytest
 from itertools import chain, combinations
 
-import xarray as xr
 import numpy as np
+import pytest
+import xarray as xr
 
-from calliope.test.common.util import build_test_model as build_model
 from calliope import AttrDict
-
+from calliope.backend import backends, latex_backend
+from calliope.test.common.util import build_test_model as build_model
 
 ALL_DIMS = {"nodes", "techs", "carriers", "costs", "timesteps", "carrier_tiers"}
 
@@ -24,13 +24,6 @@ def foreach(request):
 @pytest.fixture(scope="session")
 def simple_supply():
     m = build_model({}, "simple_supply,two_hours,investment_costs")
-    m.run()
-    return m
-
-
-@pytest.fixture(scope="class")
-def simple_supply_new_build():
-    m = build_model({}, "simple_supply,two_hours,investment_costs")
     m.build()
     m.solve()
     return m
@@ -39,84 +32,96 @@ def simple_supply_new_build():
 @pytest.fixture(scope="session")
 def supply_milp():
     m = build_model({}, "supply_milp,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def storage_milp():
     m = build_model({}, "storage_milp,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def conversion_plus_milp():
     m = build_model({}, "conversion_plus_milp,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def supply_and_supply_plus_milp():
     m = build_model({}, "supply_and_supply_plus_milp,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def simple_supply_and_supply_plus():
     m = build_model({}, "simple_supply_and_supply_plus,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def simple_storage():
     m = build_model({}, "simple_storage,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def simple_conversion():
     m = build_model({}, "simple_conversion,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def supply_export():
     m = build_model({}, "supply_export,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def supply_purchase():
     m = build_model({}, "supply_purchase,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def conversion_plus_purchase():
     m = build_model({}, "conversion_plus_purchase,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def storage_purchase():
     m = build_model({}, "storage_purchase,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
 @pytest.fixture(scope="session")
 def simple_conversion_plus():
     m = build_model({}, "simple_conversion_plus,two_hours,investment_costs")
-    m.run()
+    m.build()
+    m.solve()
     return m
 
 
@@ -143,6 +148,7 @@ def dummy_model_data():
                 [[1.0, np.nan, 1.0, 3], [np.inf, 2.0, True, np.nan]],
             ),
             "only_techs": (["techs"], [np.nan, 1, 2, 3]),
+            "no_dims": (2),
             "all_inf": (["nodes", "techs"], np.ones((2, 4)) * np.inf, {"is_result": 1}),
             "all_nan": (["nodes", "techs"], np.ones((2, 4)) * np.nan),
             "all_false": (["nodes", "techs"], np.zeros((2, 4)).astype(bool)),
@@ -186,6 +192,10 @@ def dummy_model_data():
                 ["carriers", "techs"],
                 [[1.0, np.nan, 1.0, np.nan], [np.nan, 1.0, np.nan, np.nan]],
             ),
+            "lookup_techs": (
+                ["techs"],
+                ["foobar", np.nan, "foobaz", np.nan],
+            ),
             "link_remote_nodes": (
                 ["nodes", "techs"],
                 [["bar", np.nan, "bar", np.nan], ["foo", np.nan, np.nan, np.nan]],
@@ -201,8 +211,11 @@ def dummy_model_data():
         attrs={"scenarios": ["foo"]},
     )
     # xarray forces np.nan to strings if all other values are strings.
-    for k in ["link_remote_nodes", "link_remote_techs"]:
+    for k in ["link_remote_nodes", "link_remote_techs", "lookup_techs"]:
         model_data[k] = model_data[k].where(model_data[k] != "nan")
+
+    for param in model_data.data_vars.values():
+        param.attrs["is_result"] = 0
 
     model_data.attrs["run_config"] = AttrDict(
         {"foo": True, "bar": {"foobar": "baz"}, "foobar": {"baz": {"foo": np.inf}}}
@@ -213,3 +226,32 @@ def dummy_model_data():
         {"all_inf": np.inf, "all_nan": np.nan, "with_inf": 100, "only_techs": 5}
     )
     return model_data
+
+
+def populate_backend_model(backend, model_data):
+    backend.add_all_parameters(model_data, model_data.run_config)
+    backend.add_variable(
+        model_data,
+        "multi_dim_var",
+        {
+            "foreach": ["nodes", "techs"],
+            "where": "with_inf",
+            "bounds": {"min": "0", "max": ".inf"},
+        },
+    )
+    backend.add_variable(
+        model_data, "no_dim_var", {"bounds": {"min": "-1", "max": "1"}}
+    )
+    return backend
+
+
+@pytest.fixture(scope="module")
+def dummy_pyomo_backend_model(dummy_model_data):
+    backend = backends.PyomoBackendModel()
+    return populate_backend_model(backend, dummy_model_data)
+
+
+@pytest.fixture(scope="module")
+def dummy_latex_backend_model(dummy_model_data):
+    backend = latex_backend.LatexBackendModel()
+    return populate_backend_model(backend, dummy_model_data)

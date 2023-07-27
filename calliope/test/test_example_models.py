@@ -1,11 +1,12 @@
-from calliope import exceptions
 import shutil
 
+import numpy as np
+import pandas as pd
 import pytest
 from pytest import approx
-import pandas as pd
-import numpy as np
+
 import calliope
+from calliope import exceptions
 from calliope.test.common.util import check_error_or_warning
 
 
@@ -35,7 +36,7 @@ class TestModelPreproccessing:
 
 
 class TestNationalScaleExampleModelSenseChecks:
-    def example_tester(self, solver="cbc", solver_io=None, backend_runner="run"):
+    def example_tester(self, solver="cbc", solver_io=None):
         model = calliope.examples.national_scale(
             override_dict={"model.subset_time": ["2005-01-01", "2005-01-01"]}
         )
@@ -43,11 +44,8 @@ class TestNationalScaleExampleModelSenseChecks:
         model.run_config["solver"] = solver
         model.run_config["solver_io"] = solver_io
 
-        if backend_runner == "run":
-            model.run()
-        elif backend_runner == "solve":
-            model.build()
-            model.solve()
+        model.build()
+        model.solve()
 
         assert model.results.storage_cap.sel(nodes="region1-1", techs="csp") == approx(
             45129.950
@@ -79,9 +77,8 @@ class TestNationalScaleExampleModelSenseChecks:
             ).item()
         ) == approx(0.2642256, abs=0.000001)
 
-    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
-    def test_nationalscale_example_results_cbc(self, backend_runner):
-        self.example_tester(backend_runner=backend_runner)
+    def test_nationalscale_example_results_cbc(self):
+        self.example_tester()
 
     def test_nationalscale_example_results_gurobi(self):
         pytest.importorskip("gurobipy")
@@ -105,7 +102,8 @@ class TestNationalScaleExampleModelSenseChecks:
         # gen = model.get_formatted_array("carrier_prod").sum(dim=["timesteps", "locs"])
         # lcoe = costs.sum(dim="techs") / gen.sel(techs=["ccgt", "csp"]).sum(dim="techs")
         model = calliope.examples.national_scale()
-        model.run()
+        model.build()
+        model.solve()
 
         assert model.results.total_levelised_cost.item() == approx(0.067005, abs=1e-5)
 
@@ -119,13 +117,15 @@ class TestNationalScaleExampleModelSenseChecks:
             calliope.examples.national_scale(override_dict=override)
 
 
+@pytest.mark.xfail(reason="Not reimplemented the 'check feasibility' objective")
 class TestNationalScaleExampleModelInfeasibility:
     def example_tester(self):
         model = calliope.examples.national_scale(
             scenario="check_feasibility", override_dict={"run.cyclic_storage": False}
         )
 
-        model.run()
+        model.build()
+        model.solve()
 
         assert model.results.termination_condition in [
             "infeasible",
@@ -147,11 +147,13 @@ class TestNationalScaleExampleModelOperate:
                 override_dict={"model.subset_time": ["2005-01-01", "2005-01-03"]},
                 scenario="operate",
             )
-            model.run()
+            model.build()
 
         expected_warning = "Resource capacity constraint defined and set to infinity for all supply_plus techs"
 
         assert check_error_or_warning(excinfo, expected_warning)
+
+        model.solve()
         assert all(
             model.results.timesteps
             == pd.date_range("2005-01", "2005-01-03 23:00:00", freq="H")
@@ -175,18 +177,23 @@ class TestNationalScaleExampleModelSpores:
             scenario="spores",
         )
 
-        model.run(build_only=True)
+        model.build()
 
         # The initial state of the objective cost class scores should be monetary: 1, spores_score: 0
-        assert model._backend_model.objective_cost_class["monetary"].value == 1
-        assert model._backend_model.objective_cost_class["spores_score"].value == 0
+        assert (
+            model.backend.parameters.objective_cost_class["monetary"].item().value == 1
+        )
+        assert (
+            model.backend.parameters.objective_cost_class["spores_score"].item().value
+            == 0
+        )
 
-        model.run(force_rerun=True)
+        model.solve()
         # Expecting three spores + first optimal run
         assert np.allclose(model.results.spores, [0, 1, 2, 3])
 
         costs = model.results.cost.sum(["nodes", "techs"])
-        slack_cost = model._backend_model.cost_max.value
+        slack_cost = model.backend.parameters.cost_max.item().value
 
         # First run is the optimal run, everything else is coming up against the slack cost
         assert costs.loc[{"spores": 0, "costs": "monetary"}] * (
@@ -201,8 +208,13 @@ class TestNationalScaleExampleModelSpores:
         assert all(costs.diff("spores").loc[{"costs": "spores_score"}] >= 0)
 
         # The final state of the objective cost class scores should be monetary: 0, spores_score: 1
-        assert model._backend_model.objective_cost_class["monetary"].value == 0
-        assert model._backend_model.objective_cost_class["spores_score"].value == 1
+        assert (
+            model.backend.parameters.objective_cost_class["monetary"].item().value == 0
+        )
+        assert (
+            model.backend.parameters.objective_cost_class["spores_score"].item().value
+            == 1
+        )
         return model._model_data
 
     def test_nationalscale_example_results_cbc(self):
@@ -233,7 +245,8 @@ class TestNationalScaleExampleModelSpores:
             scenario="spores",
         )
 
-        model.run()
+        model.build()
+        model.solve()
 
         return model._model_data
 
@@ -246,7 +259,8 @@ class TestNationalScaleExampleModelSpores:
 
         spores_model.run_config["spores_options"]["skip_cost_op"] = True
 
-        spores_model.run(force_rerun=True)
+        spores_model.build()
+        spores_model.solve(force=True)
 
         assert set(spores_model.results.spores.values) == set(range(init_spore, 4))
         assert base_model_data.loc[{"spores": slice(init_spore + 1, None)}].equals(
@@ -258,7 +272,8 @@ class TestNationalScaleExampleModelSpores:
             config=None, model_data=base_model_data.loc[{"spores": [0, 1]}]
         )
         with pytest.raises(exceptions.ModelError) as excinfo:
-            spores_model.run(force_rerun=True)
+            spores_model.build()
+            spores_model.solve(force=True)
         assert check_error_or_warning(
             excinfo, "Cannot run SPORES with a SPORES dimension in any input"
         )
@@ -314,7 +329,7 @@ class TestNationalScaleExampleModelSpores:
         # So we can force its minimum/exact capacity without influencing other tech SPORE scores.
         # This enables us to test our functionality that only *additional* capacity is scored.
         override_dict = {
-            f"locations.region1.techs.ccgt.constraints.energy_cap_min": 15000
+            "locations.region1.techs.ccgt.constraints.energy_cap_min": 15000
         }
         result_with_override, _ = spores_with_override(override_dict)
         assert (
@@ -331,8 +346,8 @@ class TestNationalScaleExampleModelSpores:
         # So we can force its minimum/exact capacity without influencing other tech SPORE scores.
         # This enables us to test our functionality that only *additional* capacity is scored.
         override_dict = {
-            f"locations.region1.techs.ccgt.constraints.energy_cap_min": 15000,
-            f"locations.region1.techs.ccgt.constraints.energy_cap_equals": 30000,
+            "locations.region1.techs.ccgt.constraints.energy_cap_min": 15000,
+            "locations.region1.techs.ccgt.constraints.energy_cap_equals": 30000,
         }
         result_with_override, _ = spores_with_override(override_dict)
         assert (
@@ -344,7 +359,7 @@ class TestNationalScaleExampleModelSpores:
 
 
 class TestNationalScaleResampledExampleModelSenseChecks:
-    def example_tester(self, solver="cbc", solver_io=None, backend_runner="run"):
+    def example_tester(self, solver="cbc", solver_io=None):
         override = {
             "model.subset_time": ["2005-01-01", "2005-01-01"],
             "run.solver": solver,
@@ -354,11 +369,8 @@ class TestNationalScaleResampledExampleModelSenseChecks:
             override["run.solver_io"] = solver_io
 
         model = calliope.examples.time_resampling(override_dict=override)
-        if backend_runner == "run":
-            model.run()
-        elif backend_runner == "solve":
-            model.build()
-            model.solve()
+        model.build()
+        model.solve()
 
         assert model.results.storage_cap.sel(nodes="region1-1", techs="csp") == approx(
             23563.444
@@ -390,9 +402,8 @@ class TestNationalScaleResampledExampleModelSenseChecks:
             ].item()
         ) == approx(0.25, abs=0.000001)
 
-    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
-    def test_nationalscale_example_results_cbc(self, backend_runner):
-        self.example_tester(backend_runner=backend_runner)
+    def test_nationalscale_example_results_cbc(self):
+        self.example_tester()
 
     def test_nationalscale_resampled_example_results_glpk(self):
         if shutil.which("glpsol"):
@@ -413,6 +424,7 @@ class TestNationalScaleClusteredExampleModelSenseChecks:
         storage_inter_cluster=False,
         cyclic=False,
         storage=True,
+        backend_runner="run",
     ):
         override = {
             "model.time.function_options": {
@@ -424,14 +436,16 @@ class TestNationalScaleClusteredExampleModelSenseChecks:
         }
         if storage is False:
             override.update({"techs.battery.exists": False, "techs.csp.exists": False})
-
         if solver_io:
             override["run.solver_io"] = solver_io
+        if storage_inter_cluster and backend_runner == "solve":
+            override["model.custom_math"] = ["storage_inter_cluster"]
 
         model = calliope.examples.time_clustering(override_dict=override)
         timesteps = model._model_data.timesteps.copy(deep=True)
 
-        model.run()
+        model.build()
+        model.solve()
 
         # make sure the dimension items have not been accidentally reordered
         assert timesteps.equals(model._model_data.timesteps)
@@ -458,7 +472,7 @@ class TestNationalScaleClusteredExampleModelSenseChecks:
 
         return None
 
-    def example_tester_closest(self, solver="cbc", solver_io=None):
+    def example_tester_closest(self, backend_runner, solver="cbc", solver_io=None):
         self.model_runner(
             solver=solver,
             expected_total_cost=51711873.177,  # was 49670627.15297682 when clustering with sklearn < v0.24
@@ -466,9 +480,10 @@ class TestNationalScaleClusteredExampleModelSenseChecks:
             expected_capacity_factor=0.074809,  # was 0.064501 when clustering with sklearn < v0.24
             solver_io=solver_io,
             how="closest",
+            backend_runner=backend_runner,
         )
 
-    def example_tester_mean(self, solver="cbc", solver_io=None):
+    def example_tester_mean(self, backend_runner, solver="cbc", solver_io=None):
         self.model_runner(
             solver=solver,
             expected_total_cost=45110416.434,  # was 22172253.328 when clustering with sklearn < v0.24
@@ -476,31 +491,26 @@ class TestNationalScaleClusteredExampleModelSenseChecks:
             expected_capacity_factor=0.047596,  # was 0.044458 when clustering with sklearn < v0.24
             solver_io=solver_io,
             how="mean",
+            backend_runner=backend_runner,
         )
 
-    def example_tester_storage_inter_cluster(self):
+    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
+    def test_nationalscale_clustered_example_closest_results_cbc(self, backend_runner):
+        self.example_tester_closest(backend_runner)
+
+    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
+    def test_nationalscale_clustered_example_mean_results_cbc(self, backend_runner):
+        self.example_tester_mean(backend_runner)
+
+    def test_nationalscale_clustered_example_storage_inter_cluster(self):
         self.model_runner(
             expected_total_cost=33353390.626,  # was 21825515.304 when clustering with sklearn < v0.24
             expected_levelised_cost=0.115866,  # was 0.100760 when clustering with sklearn < v0.24
             expected_capacity_factor=0.074167,  # was 0.091036 when clustering with sklearn < v0.24
             storage_inter_cluster=True,
+            backend_runner="solve",
         )
 
-    def test_nationalscale_clustered_example_closest_results_cbc(self):
-        self.example_tester_closest()
-
-    def test_nationalscale_clustered_example_mean_results_cbc(self):
-        self.example_tester_mean()
-
-    @pytest.mark.xfail(
-        reason="New implementation of constraint subsets does't allow for negative values of storage_cap, which is needed for inter cluster storage"
-    )
-    def test_nationalscale_clustered_example_storage_inter_cluster(self):
-        self.example_tester_storage_inter_cluster()
-
-    @pytest.mark.xfail(
-        reason="New implementation of constraint subsets does't allow for negative values of storage_cap, which is needed for inter cluster storage"
-    )
     def test_storage_inter_cluster_cyclic(self):
         self.model_runner(
             expected_total_cost=18838244.197,  # was 18904055.722 when clustering with sklearn < v0.24
@@ -508,26 +518,12 @@ class TestNationalScaleClusteredExampleModelSenseChecks:
             expected_capacity_factor=0.071411,  # was 0.075145 when clustering with sklearn < v0.24
             storage_inter_cluster=True,
             cyclic=True,
+            backend_runner="solve",
         )
-
-    @pytest.mark.xfail(
-        reason="New implementation of constraint subsets does't allow for negative values of storage_cap, which is needed for inter cluster storage"
-    )
-    def test_storage_inter_cluster_no_storage(self):
-        with pytest.warns(calliope.exceptions.ModelWarning) as excinfo:
-            self.model_runner(storage_inter_cluster=True, storage=False)
-
-        expected_warnings = [
-            "Tech battery was removed by setting ``exists: False``",
-            "Tech csp was removed by setting ``exists: False``",
-        ]
-        assert check_error_or_warning(excinfo, expected_warnings)
 
 
 class TestUrbanScaleExampleModelSenseChecks:
-    def example_tester(
-        self, resource_unit, solver="cbc", solver_io=None, backend_runner="run"
-    ):
+    def example_tester(self, resource_unit, solver="cbc", solver_io=None):
         unit_override = {
             "techs.pv.constraints.resource": "file=pv_resource.csv:{}".format(
                 resource_unit
@@ -542,11 +538,8 @@ class TestUrbanScaleExampleModelSenseChecks:
 
         model = calliope.examples.urban_scale(override_dict=override)
 
-        if backend_runner == "run":
-            model.run()
-        elif backend_runner == "solve":
-            model.build()
-            model.solve()
+        model.build()
+        model.solve()
 
         assert model.results.energy_cap.sel(nodes="X1", techs="chp") == approx(
             250.090112
@@ -575,36 +568,30 @@ class TestUrbanScaleExampleModelSenseChecks:
         cost_sum = 430.097399 if solver == "glpk" else 430.089188
         assert float(model.results.cost.sum()) == approx(cost_sum)
 
-    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
-    def test_urban_example_results_area(self, backend_runner):
-        self.example_tester("per_area", backend_runner=backend_runner)
+    def test_urban_example_results_area(self):
+        self.example_tester("per_area")
 
     def test_urban_example_results_area_gurobi(self):
-        gurobi = pytest.importorskip("gurobipy")
+        pytest.importorskip("gurobipy")
         self.example_tester("per_area", solver="gurobi", solver_io="python")
 
-    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
-    def test_urban_example_results_cap(self, backend_runner):
-        self.example_tester("per_cap", backend_runner=backend_runner)
+    def test_urban_example_results_cap(self):
+        self.example_tester("per_cap")
 
     def test_urban_example_results_cap_gurobi(self):
-        gurobi = pytest.importorskip("gurobipy")
+        pytest.importorskip("gurobipy")
         self.example_tester("per_cap", solver="gurobi", solver_io="python")
 
     @pytest.mark.filterwarnings("ignore:(?s).*Integer:calliope.exceptions.ModelWarning")
-    @pytest.mark.parametrize("backend_runner", ["run", "solve"])
-    def test_milp_example_results(self, backend_runner):
+    def test_milp_example_results(self):
         model = calliope.examples.milp(
             override_dict={
                 "model.subset_time": ["2005-01-01", "2005-01-01"],
                 "run.solver_options.mipgap": 0.001,
             }
         )
-        if backend_runner == "run":
-            model.run()
-        elif backend_runner == "solve":
-            model.build()
-            model.solve()
+        model.build()
+        model.solve()
 
         assert model.results.energy_cap.sel(nodes="X1", techs="chp") == 300
         assert model.results.energy_cap.sel(
@@ -629,7 +616,7 @@ class TestUrbanScaleExampleModelSenseChecks:
             override_dict={"model.subset_time": ["2005-07-01", "2005-07-04"]}
         )
         with pytest.warns(calliope.exceptions.ModelWarning) as excinfo:
-            model.run()
+            model.build()
 
         expected_warnings = [
             "Energy capacity constraint removed",

@@ -12,34 +12,32 @@ from __future__ import annotations
 
 import logging
 import warnings
-from typing import Literal, Union, Optional, Callable
 from pathlib import Path
-from calliope.core.util.tools import relative_path
+from typing import Callable, Literal, Optional, TypeVar, Union
 
 import xarray
 
 import calliope
-from calliope.postprocess import results as postprocess_results
+from calliope import exceptions
+from calliope.backend import backends, latex_backend, parsing
 from calliope.core import io
-from calliope.preprocess import (
-    model_run_from_yaml,
-    model_run_from_dict,
-)
-from calliope.preprocess.model_data import ModelDataFactory
 from calliope.core.attrdict import AttrDict
 from calliope.core.util.logging import log_time
-from calliope.core.util.tools import copy_docstring
-from calliope import exceptions
-from calliope.backend.run import run as run_backend
-from calliope.backend import backends, parsing
+from calliope.core.util.tools import copy_docstring, relative_path, validate_dict
+from calliope.postprocess import results as postprocess_results
+from calliope.preprocess import model_run_from_dict, model_run_from_yaml
+from calliope.preprocess.model_data import ModelDataFactory
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar(
+    "T", bound=Union[backends.PyomoBackendModel, latex_backend.LatexBackendModel]
+)
 
 
 def read_netcdf(path):
     """
     Return a Model object reconstructed from model data in a NetCDF file.
-
     """
     model_data = io.read_netcdf(path)
     return Model(config=None, model_data=model_data)
@@ -48,10 +46,12 @@ def read_netcdf(path):
 class Model(object):
     """
     A Calliope Model.
-
     """
 
     _BACKENDS: dict[str, Callable] = {"pyomo": backends.PyomoBackendModel}
+    _MATH_SCHEMA = AttrDict.from_yaml(
+        Path(calliope.__file__).parent / "config" / "math_schema.yaml"
+    )
 
     def __init__(
         self,
@@ -65,17 +65,30 @@ class Model(object):
         Returns a new Model from either the path to a YAML model
         configuration file or a dict fully specifying the model.
 
-        Parameters
-        ----------
-        config : str or dict or AttrDict
-            If str, must be the path to a model configuration file.
-            If dict or AttrDict, must fully specify the model.
-        model_data : Dataset, optional
-            Create a Model instance from a fully built model_data Dataset.
-            This is only used if `config` is explicitly set to None
-            and is primarily used to re-create a Model instance from
-            a model previously saved to a NetCDF file.
+        Args:
+            config (Optional[Union[str, dict]]):
+                If str, must be the path to a model configuration file.
+                If dict or AttrDict, must fully specify the model.
+            model_data (Optional[xarray.Dataset], optional):
+                Create a Model instance from a fully built model_data Dataset.
+                This is only used if `config` is explicitly set to None and is primarily used to re-create a Model instance from a model previously saved to a NetCDF file.
+                Defaults to None.
+            debug (bool, optional):
+                If True, additional debug data will be included in the built model.
+                Defaults to False.
 
+        Keyword Args:
+            timeseries_dataframes (dict[str, pd.DataFrame]):
+                If supplying `config` as a dictionary, in-memory timeseries data can be referred to using `df=...`.
+                The referenced data must be supplied here as a dicitionary of dataframes.
+            scenario (str):
+                Comma delimited string of pre-defined `scenarios` to apply to the model,
+            override_dict (dict):
+                Additional overrides to apply to `config`.
+                These will be applied *after* applying any defined `scenario` overrides.
+
+        Raises:
+            ValueError: `config` must be provided (as one of `str`, `int`, `None`).
         """
         self._timings: dict = {}
         self.defaults: AttrDict
@@ -83,6 +96,7 @@ class Model(object):
         self.run_config: AttrDict
         self.math: AttrDict
         self._config_path: Optional[str]
+        self.math_documentation = latex_backend.MathDocumentation(self._build)
 
         # try to set logging output format assuming python interactive. Will
         # use CLI logging format if model called from CLI
@@ -104,9 +118,17 @@ class Model(object):
             raise ValueError(
                 "Input configuration must either be a string or a dictionary."
             )
-        self._check_future_deprecation_warnings()
 
-    def _init_from_model_run(self, model_run, debug_data, debug):
+    def _init_from_model_run(
+        self, model_run: calliope.AttrDict, debug_data: calliope.AttrDict, debug: bool
+    ) -> None:
+        """Initialise the model using a `model_run` dictionary, which may have been loaded from YAML.
+
+        Args:
+            model_run (calliope.AttrDict): Preprocessed model configuration.
+            debug_data (calliope.AttrDict): Additional data from processing the input configuration.
+            debug (bool): If True, `debug_data` will be attached to the Model object as the attribute `calliope.Model._debug_data`.
+        """
         self._model_run = model_run
         log_time(
             logger,
@@ -143,7 +165,6 @@ class Model(object):
 
         self._add_observed_dict("model_config", model_config)
         self._add_observed_dict("run_config", model_run["run"])
-        self._add_observed_dict("subsets", model_run["subsets"])
         self._add_observed_dict("defaults", self._generate_default_dict())
 
         math = self._add_math(model_config["custom_math"])
@@ -157,7 +178,15 @@ class Model(object):
             comment="Model: preprocessing complete",
         )
 
-    def _init_from_model_data(self, model_data):
+    def _init_from_model_data(self, model_data: xarray.Dataset) -> None:
+        """
+        Initialise the model using a pre-built xarray dataset.
+        This must be a Calliope-compatible dataset, usually a dataset from another Calliope model.
+
+        Args:
+            model_data (xarray.Dataset):
+                Model dataset with input parameters as arrays and configuration stored in the dataset attributes dictionary.
+        """
         if "_model_run" in model_data.attrs:
             self._model_run = AttrDict.from_yaml_string(model_data.attrs["_model_run"])
             del model_data.attrs["_model_run"]
@@ -179,11 +208,15 @@ class Model(object):
         )
 
     def _add_model_data_methods(self):
+        """
+        1. Filter model dataset to produce views on the input/results data
+        2. Add top-level configuration dictionaries simultaneously to the model data attributes and as attributes of this class.
+
+        """
         self.inputs = self._model_data.filter_by_attrs(is_result=0)
         self.results = self._model_data.filter_by_attrs(is_result=1)
         self._add_observed_dict("model_config")
         self._add_observed_dict("run_config")
-        self._add_observed_dict("subsets")
         self._add_observed_dict("math")
 
         self.inputs = self._model_data.filter_by_attrs(is_result=0)
@@ -312,14 +345,28 @@ class Model(object):
             filepath = Path(calliope.__file__).parent / "math" / f"{run_mode}.yaml"
             self.math.union(AttrDict.from_yaml(filepath), allow_override=True)
 
-    def build(self, backend_interface: Literal["pyomo"] = "pyomo") -> None:
+    def build(
+        self, force: bool = False, backend_interface: Literal["pyomo"] = "pyomo"
+    ) -> None:
         """Build description of the optimisation problem in the chosen backend interface.
 
         Args:
+            force (bool, optional):
+                If ``force`` is True, any existing results will be overwritten.
+                Defaults to False.
             backend_interface (Literal["pyomo"], optional):
                 Backend interface in which to build the problem. Defaults to "pyomo".
         """
+
+        if hasattr(self, "backend") and not force:
+            raise exceptions.ModelError(
+                "This model object already has a built optimisation problem. Use model.build(force=True) "
+                "to force the existing optimisation problem to be overwritten with a new one."
+            )
         backend = self._BACKENDS[backend_interface]()
+        self.backend = self._build(backend)
+
+    def _build(self, backend: T) -> T:
         backend.add_all_parameters(self._model_data, self.run_config)
         log_time(
             logger,
@@ -328,20 +375,32 @@ class Model(object):
             comment="Model: Generated optimisation problem parameters",
         )
         self._add_run_mode_custom_math()
+        validate_dict(self.math, self._MATH_SCHEMA, "math")
         # The order of adding components matters!
-        # 1. Variables, 2. Expressions, 3. Constraints, 4. Objectives
-        for components in ["variables", "expressions", "constraints", "objectives"]:
+        # 1. Variables, 2. Global Expressions, 3. Constraints, 4. Objectives
+        for components in [
+            "variables",
+            "global_expressions",
+            "constraints",
+            "objectives",
+        ]:
             component = components.removesuffix("s")
+            if components in ["variables", "global_expressions"]:
+                backend.valid_math_element_names.update(self.math[components].keys())
             for name, dict_ in self.math[components].items():
-                getattr(backend, f"add_{component}")(self._model_data, name, dict_)
+                if dict_.get("active", True):
+                    getattr(backend, f"add_{component}")(self._model_data, name, dict_)
+                else:
+                    logger.debug(
+                        f"({component}, {name}): Component deactivated and therefore not built."
+                    )
             log_time(
                 logger,
                 self._timings,
                 f"backend_{components}_generated",
                 comment=f"Model: Generated optimisation problem {components}",
             )
-
-        self.backend = backend
+        return backend
 
     @copy_docstring(backends.BackendModel.verbose_strings)
     def verbose_strings(self) -> None:
@@ -351,17 +410,17 @@ class Model(object):
             )
         self.backend.verbose_strings()
 
-    def solve(self, force_rerun: bool = False, warmstart: bool = False) -> None:
+    def solve(self, force: bool = False, warmstart: bool = False) -> None:
         """
         Run the built optimisation problem.
 
         Args:
-            force_rerun (bool, optional):
-                If ``force_rerun`` is True, any existing results will be overwritten.
+            force (bool, optional):
+                If ``force`` is True, any existing results will be overwritten.
                 Defaults to False.
             warmstart (bool, optional):
                 If True and the optimisation problem has already been run in this session
-                (i.e., `force_rerun` is not True), the next optimisation will be run with
+                (i.e., `force` is not True), the next optimisation will be run with
                 decision variables initially set to their previously optimal values.
                 If the optimisation problem is similar to the previous run, this can
                 decrease the solution time.
@@ -370,9 +429,11 @@ class Model(object):
 
         Raises:
             exceptions.ModelError: Optimisation problem must already be built.
-            exceptions.ModelError: Cannot run the model if there are already results loaded, unless `force_rerun` is True.
+            exceptions.ModelError: Cannot run the model if there are already results loaded, unless `force` is True.
             exceptions.ModelError: Some preprocessing steps will stop a run mode of "operate" from being possible.
         """
+        run_mode = self.run_config["mode"]
+
         # Check that results exist and are non-empty
         if not hasattr(self, "backend"):
             raise exceptions.ModelError(
@@ -381,10 +442,10 @@ class Model(object):
             )
 
         if hasattr(self, "results"):
-            if self.results.data_vars and not force_rerun:
+            if self.results.data_vars and not force:
                 raise exceptions.ModelError(
                     "This model object already has results. "
-                    "Use model.run(force_rerun=True) to force"
+                    "Use model.solve(force=True) to force"
                     "the results to be overwritten with a new run."
                 )
             else:
@@ -392,14 +453,18 @@ class Model(object):
         else:
             to_drop = []
 
-        if (
-            self.run_config["mode"] == "operate"
-            and not self._model_data.attrs["allow_operate_mode"]
-        ):
+        if run_mode == "operate" and not self._model_data.attrs["allow_operate_mode"]:
             raise exceptions.ModelError(
                 "Unable to run this model in operational mode, probably because "
                 "there exist non-uniform timesteps (e.g. from time masking)"
             )
+
+        log_time(
+            logger,
+            self._timings,
+            "solve_start",
+            comment=f"Backend: starting model solve in {run_mode} mode",
+        )
 
         termination_condition = self.backend.solve(
             solver=self.run_config["solver"],
@@ -407,6 +472,14 @@ class Model(object):
             solver_options=self.run_config.get("solver_options", None),
             save_logs=self.run_config.get("save_logs", None),
             warmstart=warmstart,
+        )
+
+        log_time(
+            logger,
+            self._timings,
+            "solver_exit",
+            time_since_solve_start=True,
+            comment="Backend: solver finished running",
         )
 
         # Add additional post-processed result variables to results
@@ -435,39 +508,13 @@ class Model(object):
         Additional kwargs are passed to the backend.
 
         """
-        # Check that results exist and are non-empty
-        if hasattr(self, "results") and self.results.data_vars and not force_rerun:
-            raise exceptions.ModelError(
-                "This model object already has results. "
-                "Use model.run(force_rerun=True) to force"
-                "the results to be overwritten with a new run."
-            )
-
-        if (
-            self.run_config["mode"] == "operate"
-            and not self._model_data.attrs["allow_operate_mode"]
-        ):
-            raise exceptions.ModelError(
-                "Unable to run this model in operational mode, probably because "
-                "there exist non-uniform timesteps (e.g. from time masking)"
-            )
-
-        results, self._backend_model, self._backend_model_opt, interface = run_backend(
-            self._model_data, self._timings, **kwargs
+        warnings.warn(
+            "`run()` is deprecated and will be removed in a "
+            "future version. Use `model.build()` followed by `model.solve()`.",
+            DeprecationWarning,
         )
-
-        # Add additional post-processed result variables to results
-        if results.attrs.get("termination_condition", None) in ["optimal", "feasible"]:
-            results = postprocess_results.postprocess_model_results(
-                results, self._model_data, self._timings
-            )
-        self._model_data.attrs.update(results.attrs)
-        self._model_data = xarray.merge(
-            [results, self._model_data], compat="override", combine_attrs="no_conflicts"
-        )
-        self._add_model_data_methods()
-
-        self.backend = interface(self)
+        self.build(force=force_rerun)
+        self.solve(force=force_rerun)
 
     def get_formatted_array(self, var):
         """
@@ -512,34 +559,34 @@ class Model(object):
         """
         io.save_csv(self._model_data, path, dropna)
 
-    def to_lp(self, path):
+    @copy_docstring(backends.BackendModel.to_lp)
+    def to_lp(self, path: Union[str, Path]) -> None:
         """
-        Save built model to LP format at the given ``path``. If the backend
-        model has not been built yet, it is built prior to saving.
+        Raises:
+            exceptions.ModelError: This method cannot be called prior to calling `build()`.
         """
-        io.save_lp(self, path)
 
-    def info(self):
+        if not hasattr(self, "backend"):
+            raise exceptions.ModelError(
+                "Build the optimisation problem by calling `build()` before trying to generate an LP file."
+            )
+        self.backend.to_lp(path)
+
+    def info(self) -> str:
+        """Generate basic description of the model, combining its name and a rough indication of the model size.
+
+        Returns:
+            str: Basic description of the model.
+        """
         info_strings = []
         model_name = self.model_config.get("name", "None")
-        info_strings.append("Model name:   {}".format(model_name))
-        msize = "{nodes} nodes, {techs} technologies, {times} timesteps".format(
-            nodes=len(self._model_data.coords.get("nodes", [])),
-            techs=(
-                len(self._model_data.coords.get("techs_non_transmission", []))
-                + len(self._model_data.coords.get("techs_transmission_names", []))
-            ),
-            times=len(self._model_data.coords.get("timesteps", [])),
+        info_strings.append(f"Model name:   {model_name}")
+        msize = dict(self._model_data.dims)
+        msize_exists = (self._model_data.node_tech * self._model_data.carrier).sum()
+        info_strings.append(
+            f"Model size:   {msize} ({msize_exists.item()} valid node:tech:carrier:carrier_tier combinations)"
         )
-        info_strings.append("Model size:   {}".format(msize))
         return "\n".join(info_strings)
-
-    def _check_future_deprecation_warnings(self):
-        """
-        Method for all FutureWarnings and DeprecationWarnings. Comment above each
-        warning should specify Calliope version in which it was added, and the
-        version in which it should be updated/removed.
-        """
 
     def validate_math_strings(self, math_dict: dict) -> None:
         """Validate that `expression` and `where` strings of a dictionary containing string mathematical formulations can be successfully parsed. This function can be used to test custom math before attempting to build the optimisation problem.
@@ -547,14 +594,14 @@ class Model(object):
         NOTE: strings are not checked for evaluation validity. Evaluation issues will be raised only on calling `Model.build()`.
 
         Args:
-            math_dict (dict): Math formulation dictionary to validate. Top level keys must be one or more of ["variables", "expressions", "constraints", "objectives"], e.g.:
+            math_dict (dict): Math formulation dictionary to validate. Top level keys must be one or more of ["variables", "global_expressions", "constraints", "objectives"], e.g.:
             {
                 "constraints": {
                     "my_constraint_name":
                         {
                             "foreach": ["nodes"],
                             "where": "inheritance(supply)",
-                            "equation": "sum(energy_cap, over=techs) >= 10"
+                            "equations": [{"expression": "sum(energy_cap, over=techs) >= 10"}]
                         }
                 }
 
@@ -563,11 +610,12 @@ class Model(object):
             If all components of the dictionary are parsed successfully, this function will log a success message to the INFO logging level and return None.
             Otherwise, a calliope.ModelError will be raised with parsing issues listed.
         """
+        validate_dict(math_dict, self._MATH_SCHEMA, "math")
         valid_math_element_names = [
             *self.math["variables"].keys(),
-            *self.math["expressions"].keys(),
+            *self.math["global_expressions"].keys(),
             *math_dict.get("variables", {}).keys(),
-            *math_dict.get("expressions", {}).keys(),
+            *math_dict.get("global_expressions", {}).keys(),
             *self.inputs.data_vars.keys(),
             *self.defaults.keys(),
             # FIXME: these should not be hardcoded, but rather end up in model data keys
