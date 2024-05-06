@@ -931,7 +931,6 @@ def target_reserve_share_operating_constraint_rule(
             loc_tech_carrier.split("::")[0]
             for loc_tech_carrier in lhs_loc_tech_carriers
         ]
-        timestep_resolution = backend_model.timestep_resolution[timestep]
 
         lhs = sum(
             reserve[loc_tech_carrier,timestep]
@@ -960,20 +959,6 @@ def target_reserve_share_operating_constraint_rule(
                     )
                 )
                 * backend_model.carrier_prod[loc_tech_carrier, timestep]
-                for loc_tech_carrier in backend_model.loc_tech_carriers_prod
-                if (loc_tech_carrier.split("::")[-1] == carrier)
-                and (loc_tech_carrier.split("::")[0] in locs)
-            )
-            + sum(
-                (
-                    get_param(
-                        backend_model,
-                        "operating_reserve_cap",
-                        ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
-                    )
-                )
-                * backend_model.energy_cap[loc_tech_carrier.rsplit("::", 1)[0]]
-                * timestep_resolution
                 for loc_tech_carrier in backend_model.loc_tech_carriers_prod
                 if (loc_tech_carrier.split("::")[-1] == carrier)
                 and (loc_tech_carrier.split("::")[0] in locs)
@@ -1018,26 +1003,14 @@ def target_reserve_adder_operating_constraint_rule(
             loc_tech_carrier.split("::")[0]
             for loc_tech_carrier in lhs_loc_tech_carriers
         ]
-        timestep_resolution = backend_model.timestep_resolution[timestep]
 
         lhs = sum(
             reserve[loc_tech_carrier,timestep]
             for loc_tech_carrier in lhs_loc_tech_carriers
         )
 
-        loc_tech_carriers_con_all = [
-            loc_tech_carrier for loc_tech_carrier in backend_model.loc_tech_carriers_con
-        ]
-
         rhs = (
             target_adder
-            + (-1)
-            * sum(
-                backend_model.carrier_con[loc_tech_carrier, timestep]
-                for loc_tech_carrier in loc_tech_carriers_con_all
-                if (loc_tech_carrier.split("::")[-1] == carrier)
-                and (loc_tech_carrier.split("::")[0] in locs)
-            )
             + sum(
                 (
                     get_param(
@@ -1047,20 +1020,6 @@ def target_reserve_adder_operating_constraint_rule(
                     )
                 )
                 * backend_model.carrier_prod[loc_tech_carrier, timestep]
-                for loc_tech_carrier in backend_model.loc_tech_carriers_prod
-                if (loc_tech_carrier.split("::")[-1] == carrier)
-                and (loc_tech_carrier.split("::")[0] in locs)
-            )
-            + sum(
-                (
-                    get_param(
-                        backend_model,
-                        "operating_reserve_cap",
-                        ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
-                    )
-                )
-                * backend_model.energy_cap[loc_tech_carrier.rsplit("::", 1)[0]]
-                * timestep_resolution
                 for loc_tech_carrier in backend_model.loc_tech_carriers_prod
                 if (loc_tech_carrier.split("::")[-1] == carrier)
                 and (loc_tech_carrier.split("::")[0] in locs)
