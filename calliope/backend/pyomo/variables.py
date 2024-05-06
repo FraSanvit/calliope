@@ -15,10 +15,6 @@ def initialize_decision_variables(backend_model):
     Variable             Dimensions
     ==================== ========================================
     energy_cap           loc_techs
-    energy_cap_freq      loc_techs
-    energy_cap_reg       loc_techs
-    energy_cap_cont      loc_techs
-    energy_cap_flex      loc_techs
     carrier_prod         loc_tech_carriers_prod, timesteps
     carrier_con          loc_tech_carriers_con, timesteps
     cost                 costs, loc_techs_cost
@@ -35,6 +31,10 @@ def initialize_decision_variables(backend_model):
     operating\\_units     loc_techs_milp, timesteps
     unmet\\_demand        loc_carriers, timesteps
     unused\\_supply       loc_carriers, timesteps
+    reserve_cont         loc_tech_carriers_prod, timesteps
+    reserve_flex         loc_tech_carriers_prod, timesteps
+    reserve_freq         loc_tech_carriers_prod, timesteps
+    reserve_reg          loc_tech_carriers_prod, timesteps
     ==================== ========================================
 
     """
