@@ -15,6 +15,10 @@ def initialize_decision_variables(backend_model):
     Variable             Dimensions
     ==================== ========================================
     energy_cap           loc_techs
+    energy_cap_freq      loc_techs
+    energy_cap_reg       loc_techs
+    energy_cap_cont      loc_techs
+    energy_cap_flex      loc_techs
     carrier_prod         loc_tech_carriers_prod, timesteps
     carrier_con          loc_tech_carriers_con, timesteps
     cost                 costs, loc_techs_cost
@@ -179,3 +183,25 @@ def initialize_decision_variables(backend_model):
             backend_model.loc_carriers, backend_model.timesteps, within=po.NegativeReals
         )
         backend_model.bigM = run_config.get("bigM", 1e10)
+
+    if any("reserve" in set for set in model_data_dict["sets"]):
+        backend_model.reserve_freq = po.Var(
+            backend_model.loc_tech_carriers_prod,
+            backend_model.timesteps,
+            within=po.NonNegativeReals
+        )
+        backend_model.reserve_reg = po.Var(
+            backend_model.loc_tech_carriers_prod,
+            backend_model.timesteps,
+            within=po.NonNegativeReals
+        )
+        backend_model.reserve_cont = po.Var(
+            backend_model.loc_tech_carriers_prod,
+            backend_model.timesteps,
+            within=po.NonNegativeReals
+        )
+        backend_model.reserve_flex = po.Var(
+            backend_model.loc_tech_carriers_prod,
+            backend_model.timesteps,
+            within=po.NonNegativeReals
+        )
