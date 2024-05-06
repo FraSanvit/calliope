@@ -97,7 +97,12 @@ def load_constraints(backend_model):
             backend_model.datesteps,
             rule=storage_inter_min_rule,
         )
-
+    if "loc_tech_carriers_energy_capacity_reserve_constraint" in sets:
+        backend_model.energy_capacity_reserve_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_energy_capacity_reserve_constraint,
+            backend_model.timesteps,
+            rule=energy_capacity_reserve_constraint_rule,
+        ) 
 
 def carrier_production_max_constraint_rule(backend_model, loc_tech_carrier, timestep):
     """
@@ -417,4 +422,39 @@ def storage_inter_min_rule(backend_model, loc_tech, datestep):
         * ((1 - storage_loss) ** 24)
         + backend_model.storage_intra_cluster_min[loc_tech, cluster]
         >= 0
+    )
+
+def energy_capacity_reserve_constraint_rule(backend_model, loc_tech_carrier, timestep):
+    """
+    Set constraints to limit the capacity of a single technology type across all locations in the model.
+
+    The first valid case is applied:
+
+    .. container:: scrolling-wrapper
+
+        .. math::
+
+            \\sum_{loc}\\boldsymbol{energy_{cap}}(loc::tech)
+            \\begin{cases}
+                = energy_{cap, equals, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, equals, systemwide}(loc::tech)\\\\
+                \\leq energy_{cap, max, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, max, systemwide}(loc::tech)\\\\
+                \\text{unconstrained},& \\text{otherwise}
+            \\end{cases}
+            \\forall tech \\in techs
+
+    """ #FIXME update math
+    timestep_resolution = backend_model.timestep_resolution[timestep]
+    loc_tech = get_loc_tech(loc_tech_carrier)
+
+    cap_value = get_param(backend_model, "cap_value", (loc_tech, timestep))  
+
+    reserves = (backend_model.reserve_freq[loc_tech_carrier, timestep] + backend_model.reserve_reg[loc_tech_carrier, timestep] +
+        backend_model.reserve_cont[loc_tech_carrier, timestep] + backend_model.reserve_flex[loc_tech_carrier, timestep])
+
+    return (
+        reserves 
+        + backend_model.carrier_prod[loc_tech_carrier, timestep]
+        <= backend_model.energy_cap[loc_tech] * cap_value * timestep_resolution
     )
