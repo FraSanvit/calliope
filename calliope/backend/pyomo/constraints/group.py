@@ -208,94 +208,102 @@ def load_constraints(backend_model):
                 ),
             )
 
-        if "group_target_reserve_share_{}".format(sense) in model_data_dict:
-            setattr(
-                backend_model,
-                "group_target_reserve_share_{}_constraint".format(sense),
-                po.Constraint(
-                    getattr(
-                        backend_model,
-                        "group_names_target_reserve_share_{}".format(sense),
-                    ),
-                    backend_model.timesteps,
-                    [sense],
-                    rule=target_reserve_share_constraint_rule,
-                ),
-            )
+        for reserve_type in ["freq", "reg", "cont", "flex"]:
 
-        if "group_target_reserve_adder_{}".format(sense) in model_data_dict:
-            setattr(
-                backend_model,
-                "group_target_reserve_adder_{}_constraint".format(sense),
-                po.Constraint(
-                    getattr(
-                        backend_model,
-                        "group_names_target_reserve_adder_{}".format(sense),
+            if "group_target_reserve_share_{}_{}".format(reserve_type,sense) in model_data_dict:
+                setattr(
+                    backend_model,
+                    "group_target_reserve_share_{}_{}_constraint".format(reserve_type,sense),
+                    po.Constraint(
+                        getattr(
+                            backend_model,
+                            "group_names_target_reserve_share_{}_{}".format(reserve_type,sense),
+                        ),
+                        backend_model.timesteps,
+                        [sense],
+                        [reserve_type],
+                        rule=target_reserve_share_constraint_rule,
                     ),
-                    backend_model.timesteps,
-                    [sense],
-                    rule=target_reserve_adder_constraint_rule,
-                ),
-            )
+                )
 
-        if "group_target_reserve_abs_{}".format(sense) in model_data_dict:
-            setattr(
-                backend_model,
-                "group_target_reserve_abs_{}_constraint".format(sense),
-                po.Constraint(
-                    getattr(
-                        backend_model, "group_names_target_reserve_abs_{}".format(sense)
+            if "group_target_reserve_adder_{}_{}".format(reserve_type,sense) in model_data_dict:
+                setattr(
+                    backend_model,
+                    "group_target_reserve_adder_{}_{}_constraint".format(reserve_type,sense),
+                    po.Constraint(
+                        getattr(
+                            backend_model,
+                            "group_names_target_reserve_adder_{}_{}".format(reserve_type,sense),
+                        ),
+                        backend_model.timesteps,
+                        [sense],
+                        [reserve_type],
+                        rule=target_reserve_adder_constraint_rule,
                     ),
-                    backend_model.timesteps,
-                    [sense],
-                    rule=target_reserve_abs_constraint_rule,
-                ),
-            )
+                )
 
-        if "group_target_reserve_share_operating_{}".format(sense) in model_data_dict:
-            setattr(
-                backend_model,
-                "group_target_reserve_share_operating_{}_constraint".format(sense),
-                po.Constraint(
-                    getattr(
-                        backend_model,
-                        "group_names_target_reserve_share_operating_{}".format(sense),
+            if "group_target_reserve_abs_{}_{}".format(reserve_type,sense) in model_data_dict:
+                setattr(
+                    backend_model,
+                    "group_target_reserve_abs_{}_{}_constraint".format(reserve_type,sense),
+                    po.Constraint(
+                        getattr(
+                            backend_model, "group_names_target_reserve_abs_{}_{}".format(reserve_type,sense)
+                        ),
+                        backend_model.timesteps,
+                        [sense],
+                        [reserve_type],
+                        rule=target_reserve_abs_constraint_rule,
                     ),
-                    backend_model.timesteps,
-                    [sense],
-                    rule=target_reserve_share_operating_constraint_rule,
-                ),
-            )
+                )
 
-        if "group_target_reserve_adder_operating_{}".format(sense) in model_data_dict:
-            setattr(
-                backend_model,
-                "group_target_reserve_adder_operating_{}_constraint".format(sense),
-                po.Constraint(
-                    getattr(
-                        backend_model,
-                        "group_names_target_reserve_adder_operating_{}".format(sense),
+            if "group_target_reserve_share_operating_{}_{}".format(reserve_type,sense) in model_data_dict:
+                setattr(
+                    backend_model,
+                    "group_target_reserve_share_operating_{}_{}_constraint".format(reserve_type,sense),
+                    po.Constraint(
+                        getattr(
+                            backend_model,
+                            "group_names_target_reserve_share_operating_{}_{}".format(reserve_type,sense),
+                        ),
+                        backend_model.timesteps,
+                        [sense],
+                        [reserve_type],
+                        rule=target_reserve_share_operating_constraint_rule,
                     ),
-                    backend_model.timesteps,
-                    [sense],
-                    rule=target_reserve_adder_operating_constraint_rule,
-                ),
-            )
+                )
 
-        if "group_target_reserve_abs_operating_{}".format(sense) in model_data_dict:
-            setattr(
-                backend_model,
-                "group_target_reserve_abs_operating_{}_constraint".format(sense),
-                po.Constraint(
-                    getattr(
-                        backend_model,
-                        "group_names_target_reserve_abs_operating_{}".format(sense),
+            if "group_target_reserve_adder_operating_{}_{}".format(reserve_type,sense) in model_data_dict:
+                setattr(
+                    backend_model,
+                    "group_target_reserve_adder_operating_{}_{}_constraint".format(reserve_type,sense),
+                    po.Constraint(
+                        getattr(
+                            backend_model,
+                            "group_names_target_reserve_adder_operating_{}_{}".format(reserve_type,sense),
+                        ),
+                        backend_model.timesteps,
+                        [sense],
+                        [reserve_type],
+                        rule=target_reserve_adder_operating_constraint_rule,
                     ),
-                    backend_model.timesteps,
-                    [sense],
-                    rule=target_reserve_abs_operating_constraint_rule,
-                ),
-            )
+                )
+
+            if "group_target_reserve_abs_operating_{}_{}".format(reserve_type,sense) in model_data_dict:
+                setattr(
+                    backend_model,
+                    "group_target_reserve_abs_operating_{}_{}_constraint".format(reserve_type,sense),
+                    po.Constraint(
+                        getattr(
+                            backend_model,
+                            "group_names_target_reserve_abs_operating_{}_{}".format(reserve_type,sense),
+                        ),
+                        backend_model.timesteps,
+                        [sense],
+                        [reserve_type],
+                        rule=target_reserve_abs_operating_constraint_rule,
+                    ),
+                )
 
     if "group_demand_share_per_timestep_decision" in model_data_dict:
         relaxation = backend_model.__calliope_run_config["relax_constraint"][
@@ -697,7 +705,7 @@ def carrier_prod_constraint_rule(backend_model, group_name, what):
 
 def target_reserve_share_constraint_rule(
     backend_model, group_name, timestep, what
-):  # UPDATED the math
+):  # FIXME update the math
     """
         Enforces carrier_prod for groups of technologies and locations,
         as a sum over the entire model period.
@@ -775,7 +783,7 @@ def target_reserve_share_constraint_rule(
 
 def target_reserve_adder_constraint_rule(
     backend_model, group_name, timestep, what
-):  # UPDATED the math
+):  # FIXME update the math
     """
     Enforces carrier_prod for groups of technologies and locations,
     as a sum over the entire model period.
@@ -845,7 +853,7 @@ def target_reserve_adder_constraint_rule(
 
 def target_reserve_abs_constraint_rule(
     backend_model, group_name, timestep, what
-):  # UPDATED the math
+):  # FIXME update the math
     """
     Enforces carrier_prod for groups of technologies and locations,
     as a sum over the entire model period.
@@ -889,8 +897,8 @@ def target_reserve_abs_constraint_rule(
 
 
 def target_reserve_share_operating_constraint_rule(
-    backend_model, group_name, timestep, what
-):  # UPDATED the math
+    backend_model, group_name, timestep, what, reserve_type
+):  # FIXME update the math
     """
     Enforces carrier_prod for groups of technologies and locations,
     as a sum over the entire model period.
@@ -905,12 +913,14 @@ def target_reserve_share_operating_constraint_rule(
 
     target_share = get_param(
         backend_model,
-        f"group_target_reserve_share_operating_{what}",
+        f"group_target_reserve_share_operating_{reserve_type}_{what}",
         (group_name, timestep),
     )
 
+    reserve = getattr(backend_model, f"reserve_{reserve_type}")
+
     if invalid(target_share):
-        return return_noconstraint("target_reserve_share_operating", group_name)
+        return return_noconstraint(f"target_reserve_share_operating_{reserve_type}", group_name)
     else:
         lhs_loc_tech_carriers = get_group_lhs_and_rhs_loc_tech_carriers(
             backend_model, group_name
@@ -924,27 +934,17 @@ def target_reserve_share_operating_constraint_rule(
         timestep_resolution = backend_model.timestep_resolution[timestep]
 
         lhs = sum(
-            (
-                get_param(
-                    backend_model,
-                    "cap_value",
-                    ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
-                )
-            )
-            * backend_model.energy_cap[loc_tech_carrier.rsplit("::", 1)[0]]
-            * timestep_resolution
+            reserve[loc_tech_carrier,timestep]
             for loc_tech_carrier in lhs_loc_tech_carriers
         )
 
-        # loc_tech_carriers_transmission = [loc_tech_transmission + "::" + carrier for loc_tech_transmission in backend_model.loc_techs_transmission]
-        # loc_tech_carriers_con_all = [loc_tech_carrier for loc_tech_carrier in backend_model.loc_tech_carriers_con if loc_tech_carrier not in loc_tech_carriers_transmission]
         loc_tech_carriers_con_all = [
             loc_tech_carrier for loc_tech_carrier in backend_model.loc_tech_carriers_con
         ]
 
         rhs = (
             -1
-            * (1 + target_share)
+            * (target_share)
             * sum(
                 backend_model.carrier_con[loc_tech_carrier, timestep]
                 for loc_tech_carrier in loc_tech_carriers_con_all
@@ -984,8 +984,8 @@ def target_reserve_share_operating_constraint_rule(
 
 
 def target_reserve_adder_operating_constraint_rule(
-    backend_model, group_name, timestep, what
-):  # UPDATED the math
+    backend_model, group_name, timestep, what, reserve_type
+):  # FIXME update the math
     """
     Enforces carrier_prod for groups of technologies and locations,
     as a sum over the entire model period.
@@ -1000,12 +1000,14 @@ def target_reserve_adder_operating_constraint_rule(
 
     target_adder = get_param(
         backend_model,
-        f"group_target_reserve_adder_operating_{what}",
+        f"group_target_reserve_adder_operating_{reserve_type}_{what}",
         (group_name, timestep),
     )
 
+    reserve = getattr(backend_model, f"reserve_{reserve_type}")
+
     if invalid(target_adder):
-        return return_noconstraint("target_adder_share_operating", group_name)
+        return return_noconstraint(f"target_reserve_share_operating_{reserve_type}", group_name)
     else:
         lhs_loc_tech_carriers = get_group_lhs_and_rhs_loc_tech_carriers(
             backend_model, group_name
@@ -1019,15 +1021,7 @@ def target_reserve_adder_operating_constraint_rule(
         timestep_resolution = backend_model.timestep_resolution[timestep]
 
         lhs = sum(
-            (
-                get_param(
-                    backend_model,
-                    "cap_value",
-                    ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
-                )
-            )
-            * backend_model.energy_cap[loc_tech_carrier.rsplit("::", 1)[0]]
-            * timestep_resolution
+            reserve[loc_tech_carrier,timestep]
             for loc_tech_carrier in lhs_loc_tech_carriers
         )
 
@@ -1077,8 +1071,8 @@ def target_reserve_adder_operating_constraint_rule(
 
 
 def target_reserve_abs_operating_constraint_rule(
-    backend_model, group_name, timestep, what
-):  # UPDATED the math
+    backend_model, group_name, timestep, what, reserve_type
+):  # FIXME update the math
     """
     Enforces carrier_prod for groups of technologies and locations,
     as a sum over the entire model period.
@@ -1093,9 +1087,11 @@ def target_reserve_abs_operating_constraint_rule(
 
     target_abs = get_param(
         backend_model,
-        f"group_target_reserve_abs_operating_{what}",
+        f"group_target_reserve_abs_operating_{reserve_type}_{what}",
         (group_name, timestep),
     )
+
+    reserve = getattr(backend_model, f"reserve_{reserve_type}")
 
     if invalid(target_abs):
         return return_noconstraint("target_reserve_abs_operating", group_name)
@@ -1104,18 +1100,8 @@ def target_reserve_abs_operating_constraint_rule(
             backend_model, group_name
         )[0]
 
-        timestep_resolution = backend_model.timestep_resolution[timestep]
-
         lhs = sum(
-            (
-                get_param(
-                    backend_model,
-                    "cap_value",
-                    ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
-                )
-            )
-            * backend_model.energy_cap[loc_tech_carrier.rsplit("::", 1)[0]]
-            * timestep_resolution
+            reserve[loc_tech_carrier,timestep]
             for loc_tech_carrier in lhs_loc_tech_carriers
         )
 
