@@ -208,54 +208,51 @@ def load_constraints(backend_model):
                 ),
             )
 
+        if "group_target_reserve_share_{}".format(sense) in model_data_dict:
+            setattr(
+                backend_model,
+                "group_target_reserve_share_{}_constraint".format(sense),
+                po.Constraint(
+                    getattr(
+                        backend_model,
+                        "group_names_target_reserve_share_{}".format(sense),
+                    ),
+                    backend_model.timesteps,
+                    [sense],
+                    rule=target_reserve_share_constraint_rule,
+                ),
+            )
+
+        if "group_target_reserve_adder_{}".format(sense) in model_data_dict:
+            setattr(
+                backend_model,
+                "group_target_reserve_adder_{}_constraint".format(sense),
+                po.Constraint(
+                    getattr(
+                        backend_model,
+                        "group_names_target_reserve_adder_{}".format(sense),
+                    ),
+                    backend_model.timesteps,
+                    [sense],
+                    rule=target_reserve_adder_constraint_rule,
+                ),
+            )
+
+        if "group_target_reserve_abs_{}".format(sense) in model_data_dict:
+            setattr(
+                backend_model,
+                "group_target_reserve_abs_{}_constraint".format(sense),
+                po.Constraint(
+                    getattr(
+                        backend_model, "group_names_target_reserve_abs_{}".format(sense)
+                    ),
+                    backend_model.timesteps,
+                    [sense],
+                    rule=target_reserve_abs_constraint_rule,
+                ),
+            )     
+
         for reserve_type in ["freq", "reg", "cont", "flex"]:
-
-            if "group_target_reserve_share_{}_{}".format(reserve_type,sense) in model_data_dict:
-                setattr(
-                    backend_model,
-                    "group_target_reserve_share_{}_{}_constraint".format(reserve_type,sense),
-                    po.Constraint(
-                        getattr(
-                            backend_model,
-                            "group_names_target_reserve_share_{}_{}".format(reserve_type,sense),
-                        ),
-                        backend_model.timesteps,
-                        [sense],
-                        [reserve_type],
-                        rule=target_reserve_share_constraint_rule,
-                    ),
-                )
-
-            if "group_target_reserve_adder_{}_{}".format(reserve_type,sense) in model_data_dict:
-                setattr(
-                    backend_model,
-                    "group_target_reserve_adder_{}_{}_constraint".format(reserve_type,sense),
-                    po.Constraint(
-                        getattr(
-                            backend_model,
-                            "group_names_target_reserve_adder_{}_{}".format(reserve_type,sense),
-                        ),
-                        backend_model.timesteps,
-                        [sense],
-                        [reserve_type],
-                        rule=target_reserve_adder_constraint_rule,
-                    ),
-                )
-
-            if "group_target_reserve_abs_{}_{}".format(reserve_type,sense) in model_data_dict:
-                setattr(
-                    backend_model,
-                    "group_target_reserve_abs_{}_{}_constraint".format(reserve_type,sense),
-                    po.Constraint(
-                        getattr(
-                            backend_model, "group_names_target_reserve_abs_{}_{}".format(reserve_type,sense)
-                        ),
-                        backend_model.timesteps,
-                        [sense],
-                        [reserve_type],
-                        rule=target_reserve_abs_constraint_rule,
-                    ),
-                )
 
             if "group_target_reserve_share_operating_{}_{}".format(reserve_type,sense) in model_data_dict:
                 setattr(
