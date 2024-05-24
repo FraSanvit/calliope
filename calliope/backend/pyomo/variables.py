@@ -184,22 +184,28 @@ def initialize_decision_variables(backend_model):
         )
         backend_model.bigM = run_config.get("bigM", 1e10)
 
-    if any("reserve" in set for set in model_data_dict["sets"]):
+    if any("freq" in set for set in model_data_dict["sets"]):
         backend_model.reserve_freq = po.Var(
             backend_model.loc_tech_carriers_prod,
             backend_model.timesteps,
             within=po.NonNegativeReals
         )
+        
+    if any("reg" in set for set in model_data_dict["sets"]):
         backend_model.reserve_reg = po.Var(
             backend_model.loc_tech_carriers_prod,
             backend_model.timesteps,
             within=po.NonNegativeReals
-        )
+        )   
+
+    if any("cont" in set for set in model_data_dict["sets"]):
         backend_model.reserve_cont = po.Var(
             backend_model.loc_tech_carriers_prod,
             backend_model.timesteps,
             within=po.NonNegativeReals
         )
+
+    if any("flex" in set for set in model_data_dict["sets"]):
         backend_model.reserve_flex = po.Var(
             backend_model.loc_tech_carriers_prod,
             backend_model.timesteps,
