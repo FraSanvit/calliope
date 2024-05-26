@@ -219,6 +219,18 @@ def generate_constraint_sets(model_run):
         for i in sets.loc_tech_carriers_prod
         if i.rsplit("::", 1)[0] in sets.loc_techs_ramping
     ]
+    constraint_sets["loc_tech_carriers_energy_capacity_reserve_constraint"] = [
+        i
+        for i in sets.loc_tech_carriers_prod
+        if i.rsplit("::",1)[0] in sets.loc_techs_reserve
+    ]
+    # creating operating reserve constraint sets
+    for reserve_type in ["freq", "reg", "cont", "flex"]:
+        constraint_sets[f"loc_tech_carriers_energy_capacity_reserve_limit_{reserve_type}_constraint"] = [
+            i
+            for i in sets.loc_tech_carriers_prod
+            if i.rsplit("::",1)[0] in sets.loc_techs_reserve
+        ]   
     # clustering-specific dispatch constraints
     if model_run.model.get_key(
         "time.function", None

@@ -286,6 +286,11 @@ def generate_loc_tech_sets(model_run, simple_sets):
         sets.loc_techs_supply_all | sets.loc_techs_conversion_all
     )
 
+    # All techs that can be used to generate a carrier (store and move it included)
+    sets.loc_techs_reserve = (
+        sets.loc_techs_storage | sets.loc_techs_supply_conversion_all | sets.loc_techs_transmission
+    )
+
     ##
     # Sets based on specific constraints being active
     ##
