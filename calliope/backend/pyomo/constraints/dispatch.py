@@ -12,13 +12,14 @@ of the technologies
 
 import pyomo.core as po  # pylint: disable=import-error
 
-from calliope.backend.pyomo.util import get_param, get_loc_tech, get_previous_timestep
+from calliope.backend.pyomo.util import get_param, get_loc_tech, get_previous_timestep, get_var, invalid
 
 ORDER = 10  # order in which to invoke constraints relative to other constraint files
 
 
 def load_constraints(backend_model):
     sets = backend_model.__calliope_model_data["sets"]
+    model_data_dict = backend_model.__calliope_model_data["data"]
 
     if "loc_tech_carriers_carrier_production_max_constraint" in sets:
         backend_model.carrier_production_max_constraint = po.Constraint(
@@ -97,12 +98,51 @@ def load_constraints(backend_model):
             backend_model.datesteps,
             rule=storage_inter_min_rule,
         )
-    if "loc_tech_carriers_energy_capacity_reserve_constraint" in sets:
+    if any("group_target_reserve" in key for key in model_data_dict):
         backend_model.energy_capacity_reserve_constraint = po.Constraint(
             backend_model.loc_tech_carriers_energy_capacity_reserve_constraint,
             backend_model.timesteps,
             rule=energy_capacity_reserve_constraint_rule,
         ) 
+    if "loc_tech_carriers_energy_capacity_reserve_limit_freq_constraint" in sets:
+        backend_model.energy_capacity_reserve_limit_freq_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_energy_capacity_reserve_limit_freq_constraint,
+            backend_model.timesteps,
+            rule=energy_capacity_reserve_limit_freq_constraint_rule,
+        )
+    if "loc_tech_carriers_energy_capacity_reserve_limit_flex_constraint" in sets:
+        backend_model.energy_capacity_reserve_limit_flex_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_energy_capacity_reserve_limit_flex_constraint,
+            backend_model.timesteps,
+            rule=energy_capacity_reserve_limit_flex_constraint_rule,
+        )       
+    if "loc_tech_carriers_energy_capacity_reserve_limit_cont_constraint" in sets:
+        backend_model.energy_capacity_reserve_limit_cont_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_energy_capacity_reserve_limit_cont_constraint,
+            backend_model.timesteps,
+            rule=energy_capacity_reserve_limit_cont_constraint_rule,
+        )   
+    if "loc_tech_carriers_energy_capacity_reserve_limit_reg_constraint" in sets:
+        backend_model.energy_capacity_reserve_limit_reg_constraint = po.Constraint(
+            backend_model.loc_tech_carriers_energy_capacity_reserve_limit_reg_constraint,
+            backend_model.timesteps,
+            rule=energy_capacity_reserve_limit_reg_constraint_rule,
+        )     
+    # for reserve_type in ["freq", "reg", "cont", "flex"]:
+    #     if any("group_target_reserve_operating" in key for key in model_data_dict):
+    #         setattr(
+    #             backend_model,
+    #             "energy_capacity_reserve_limit_{}_constraint".format(reserve_type),
+    #             po.Constraint(
+    #                 getattr(
+    #                     backend_model,
+    #                     "loc_tech_carriers_energy_capacity_reserve_limit_{}_constraint".format(reserve_type),
+    #                 ),
+    #                 backend_model.timesteps,
+    #                 [reserve_type],
+    #                 rule=energy_capacity_reserve_limit_constraint_rule,
+    #             ),
+    #         )
 
 def carrier_production_max_constraint_rule(backend_model, loc_tech_carrier, timestep):
     """
@@ -426,7 +466,7 @@ def storage_inter_min_rule(backend_model, loc_tech, datestep):
 
 def energy_capacity_reserve_constraint_rule(backend_model, loc_tech_carrier, timestep):
     """
-    Set constraints to limit the capacity of a single technology type across all locations in the model.
+    Set constraints to limit the provision of all reserve products of a single technology type across all locations in the model.
 
     The first valid case is applied:
 
@@ -457,4 +497,163 @@ def energy_capacity_reserve_constraint_rule(backend_model, loc_tech_carrier, tim
         reserves 
         + backend_model.carrier_prod[loc_tech_carrier, timestep]
         <= backend_model.energy_cap[loc_tech] * cap_value * timestep_resolution
+    )
+
+def energy_capacity_reserve_limit_constraint_rule(backend_model, loc_tech_carrier, timestep, reserve_type):
+    """
+    Set constraints to limit the provision of each type of reserve product of a single technology type across all locations in the model.
+
+    The first valid case is applied:
+
+    .. container:: scrolling-wrapper
+
+        .. math::
+
+            \\sum_{loc}\\boldsymbol{energy_{cap}}(loc::tech)
+            \\begin{cases}
+                = energy_{cap, equals, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, equals, systemwide}(loc::tech)\\\\
+                \\leq energy_{cap, max, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, max, systemwide}(loc::tech)\\\\
+                \\text{unconstrained},& \\text{otherwise}
+            \\end{cases}
+            \\forall tech \\in techs
+
+    """ #FIXME update math
+    timestep_resolution = backend_model.timestep_resolution[timestep]
+    loc_tech = get_loc_tech(loc_tech_carrier)
+ 
+    reserve_limit = get_param(backend_model, f"reserve_limit_{reserve_type}", (loc_tech, timestep))
+    reserve = get_var(backend_model, "reserve_{}".format(reserve_type), (loc_tech_carrier, timestep))
+
+    return (
+        reserve
+        <= backend_model.energy_cap[loc_tech] * reserve_limit * timestep_resolution
+    )
+
+def energy_capacity_reserve_limit_freq_constraint_rule(backend_model, loc_tech_carrier, timestep):
+    """
+    Set constraints to limit the provision of each type of reserve product of a single technology type across all locations in the model.
+
+    .. container:: scrolling-wrapper
+
+        .. math::
+
+            \\sum_{loc}\\boldsymbol{energy_{cap}}(loc::tech)
+            \\begin{cases}
+                = energy_{cap, equals, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, equals, systemwide}(loc::tech)\\\\
+                \\leq energy_{cap, max, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, max, systemwide}(loc::tech)\\\\
+                \\text{unconstrained},& \\text{otherwise}
+            \\end{cases}
+            \\forall tech \\in techs
+
+    """ #FIXME update math
+    timestep_resolution = backend_model.timestep_resolution[timestep]
+    loc_tech = get_loc_tech(loc_tech_carrier)
+    reserve_limit = get_param(backend_model, "reserve_limit_freq", (loc_tech, timestep))
+    reserve = backend_model.reserve_freq[loc_tech_carrier, timestep]
+
+    if invalid(reserve_limit):
+        return po.Constraint.Skip
+
+    return (
+        reserve
+        <= backend_model.energy_cap[loc_tech] * reserve_limit * timestep_resolution
+    )
+
+def energy_capacity_reserve_limit_flex_constraint_rule(backend_model, loc_tech_carrier, timestep):
+    """
+    Set constraints to limit the provision of each type of reserve product of a single technology type across all locations in the model.
+
+    .. container:: scrolling-wrapper
+
+        .. math::
+
+            \\sum_{loc}\\boldsymbol{energy_{cap}}(loc::tech)
+            \\begin{cases}
+                = energy_{cap, equals, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, equals, systemwide}(loc::tech)\\\\
+                \\leq energy_{cap, max, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, max, systemwide}(loc::tech)\\\\
+                \\text{unconstrained},& \\text{otherwise}
+            \\end{cases}
+            \\forall tech \\in techs
+
+    """ #FIXME update math
+    timestep_resolution = backend_model.timestep_resolution[timestep]
+    loc_tech = get_loc_tech(loc_tech_carrier)
+    reserve_limit = get_param(backend_model, "reserve_limit_flex", (loc_tech, timestep))
+    reserve = backend_model.reserve_flex[loc_tech_carrier, timestep]
+
+    if invalid(reserve_limit):
+        return po.Constraint.Skip
+    
+    return (
+        reserve
+        <= backend_model.energy_cap[loc_tech] * reserve_limit * timestep_resolution
+    )
+
+def energy_capacity_reserve_limit_cont_constraint_rule(backend_model, loc_tech_carrier, timestep):
+    """
+    Set constraints to limit the provision of each type of reserve product of a single technology type across all locations in the model.
+
+    .. container:: scrolling-wrapper
+
+        .. math::
+
+            \\sum_{loc}\\boldsymbol{energy_{cap}}(loc::tech)
+            \\begin{cases}
+                = energy_{cap, equals, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, equals, systemwide}(loc::tech)\\\\
+                \\leq energy_{cap, max, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, max, systemwide}(loc::tech)\\\\
+                \\text{unconstrained},& \\text{otherwise}
+            \\end{cases}
+            \\forall tech \\in techs
+
+    """ #FIXME update math
+    timestep_resolution = backend_model.timestep_resolution[timestep]
+    loc_tech = get_loc_tech(loc_tech_carrier)
+    reserve_limit = get_param(backend_model, "reserve_limit_cont", (loc_tech, timestep))
+    reserve = backend_model.reserve_cont[loc_tech_carrier, timestep]
+
+    if invalid(reserve_limit):
+        return po.Constraint.Skip
+
+    return (
+        reserve
+        <= backend_model.energy_cap[loc_tech] * reserve_limit * timestep_resolution
+    )
+
+def energy_capacity_reserve_limit_reg_constraint_rule(backend_model, loc_tech_carrier, timestep):
+    """
+    Set constraints to limit the provision of each type of reserve product of a single technology type across all locations in the model.
+
+    .. container:: scrolling-wrapper
+
+        .. math::
+
+            \\sum_{loc}\\boldsymbol{energy_{cap}}(loc::tech)
+            \\begin{cases}
+                = energy_{cap, equals, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, equals, systemwide}(loc::tech)\\\\
+                \\leq energy_{cap, max, systemwide}(loc::tech),&
+                    \\text{if } energy_{cap, max, systemwide}(loc::tech)\\\\
+                \\text{unconstrained},& \\text{otherwise}
+            \\end{cases}
+            \\forall tech \\in techs
+
+    """ #FIXME update math
+    timestep_resolution = backend_model.timestep_resolution[timestep]
+    loc_tech = get_loc_tech(loc_tech_carrier)
+    reserve_limit = get_param(backend_model, "reserve_limit_reg", (loc_tech, timestep))
+    reserve = backend_model.reserve_reg[loc_tech_carrier, timestep]
+
+    if invalid(reserve_limit):
+        return po.Constraint.Skip
+    return (
+        reserve
+        <= backend_model.energy_cap[loc_tech] * reserve_limit * timestep_resolution
     )
