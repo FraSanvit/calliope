@@ -952,7 +952,7 @@ def target_reserve_share_operating_constraint_rule(
                 (
                     get_param(
                         backend_model,
-                        "operating_reserve",
+                        f"operating_reserve_{reserve_type}",
                         ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
                     )
                 )
@@ -965,7 +965,7 @@ def target_reserve_share_operating_constraint_rule(
                 (
                     get_param(
                         backend_model,
-                        "operating_reserve_cap",
+                        f"operating_reserve_cap_{reserve_type}",
                         ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
                     )
                 )
@@ -1028,7 +1028,7 @@ def target_reserve_adder_operating_constraint_rule(
                 (
                     get_param(
                         backend_model,
-                        "operating_reserve",
+                        f"operating_reserve_{reserve_type}",
                         ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
                     )
                 )
@@ -1041,7 +1041,7 @@ def target_reserve_adder_operating_constraint_rule(
                 (
                     get_param(
                         backend_model,
-                        "operating_reserve_cap",
+                        f"operating_reserve_cap_{reserve_type}",
                         ((loc_tech_carrier.rsplit("::", 1)[0]), timestep),
                     )
                 )
