@@ -180,7 +180,7 @@ techs:
             resource_area_min: 0  # name: Minimum usable resource area ¦ unit: m\ :sup:`2` ¦
             resource_area_per_energy_cap: null  # name: Resource area per energy capacity ¦ unit: m\ :sup: `2`/kW ¦ If set, forces ``resource_area`` to follow ``energy_cap`` with the given numerical ratio (e.g. setting to 1.5 means that ``resource_area == 1.5 * energy_cap``)
             resource_cap_equals: null  # name: Specific installed resource consumption capacity ¦ unit: kW ¦ overrides ``_max`` and ``_min`` constraints.
-            resource_cap_equals_energy_cap: false  # name: Resource capacity equals energy cpacity ¦ unit: boolean ¦ If true, ``resource_cap`` is forced to equal ``energy_cap``
+            resource_cap_equals_energy_cap: false  # name: Resource capacity equals energy capacity ¦ unit: boolean ¦ If true, ``resource_cap`` is forced to equal ``energy_cap``
             resource_cap_max: .inf  # name: Maximum installed resource consumption capacity ¦ unit: kW ¦
             resource_cap_min: 0  # name: Minimum installed resource consumption capacity ¦ unit: kW ¦
             resource_eff: 1.0  # name: Resource efficiency ¦ unit: fraction ¦ Efficiency (static, or from file as timeseries) in capturing resource before it reaches storage (if storage is present) or conversion to carrier.
