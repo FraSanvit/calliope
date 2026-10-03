@@ -525,8 +525,8 @@ This is because the additional math applied in operate mode deactivates the deci
         techs:
           tech1:
             constraints:
-            energy_cap_max: 1  # will be translated internally to `energy_cap` by Calliope
-            storage_cap_max: 1  # will be translated internally to `storage_cap` by Calliope
+              energy_cap_max: 1  # will be translated internally to `energy_cap` by Calliope
+              storage_cap_max: 1  # will be translated internally to `storage_cap` by Calliope
         ```
 
     === "v0.7"
