@@ -1,0 +1,54 @@
+name: Branch Push CI
+
+permissions:
+  contents: read
+
+on:
+  push:
+    branches:
+      - "**"
+    paths-ignore:
+      - README.md
+      - changelog.rst
+      - LICENSE
+      - CITATION
+      - AUTHORS
+      - doc/**
+      - docs/**
+      - .readthedocs.yml
+      - .pre-commit-config.yaml
+
+defaults:
+  run:
+    shell: bash -l {0}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+
+    - uses: prefix-dev/setup-pixi@v0.10.0
+      with:
+        pixi-version: v0.73.0
+        cache: true
+        cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+        environments: py314
+        manifest-path: pyproject.toml
+
+    - name: run tests without coverage and without time intensive tests
+      if: github.ref != 'refs/heads/main'
+      run: pixi run -e py314 test-ci
+
+    - name: run tests with coverage
+      if: github.ref == 'refs/heads/main'
+      run: pixi run -e py314 test-cov
+
+    - name: upload coverage report to Codecov
+      if: github.ref == 'refs/heads/main'
+      uses: codecov/codecov-action@v4
+      with:
+        token: ${{ secrets.CODECOV_TOKEN }}
+        fail_ci_if_error: true
+        directory: "./reports/coverage/"
+        verbose: true

@@ -1,10 +1,17 @@
-version: 2 # required
-formats: [pdf]
-conda:
-  environment: requirements_docs.yml
+version: 2
 build:
-  os: ubuntu-22.04 # required
+  os: ubuntu-24.04
   tools:
-    python: mambaforge-4.10
-sphinx:
-  configuration: doc/conf.py
+    python: "3.12"
+  jobs:
+    create_environment:
+    - asdf plugin add pixi
+    - asdf install pixi latest
+    - asdf global pixi latest
+    install:
+    - pixi install -e docs
+    build:
+      html:
+      - pixi run docs-build -d $READTHEDOCS_OUTPUT/html
+mkdocs:
+  configuration: mkdocs.yml

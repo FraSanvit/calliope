@@ -1,0 +1,25 @@
+name: Markdown link check
+
+permissions:
+  contents: read
+
+on:
+  schedule:  # runs every monday at 9 am
+    - cron: "0 9 * * 1"
+  pull_request:
+    branches:
+      - "main"
+    paths:
+      - "**.md"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: markdown-link-check
+        uses: jhoblitt/markdown-linkerator-action@v1.0.0
+        with:
+          config: mlc_config.json
+          rate: "1"                                 # per-host pacing avoids 429s
+          workers: "10"

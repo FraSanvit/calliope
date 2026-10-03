@@ -1,0 +1,31 @@
+name: Publish to PyPI (test)
+
+permissions:
+  contents: read
+  id-token: write
+
+on:
+  pull_request:
+    branches:
+      - "main"
+
+jobs:
+  pip-test:
+    environment:
+      name: pre-release
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.pull_request.title, 'Release v')
+    steps:
+      - uses: actions/checkout@v6
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+      - name: Install Python
+        run: uv python install 3.14
+      - name: Build
+        run: uv build
+      - name: Smoke test (wheel)
+        run: uv run --isolated --no-project --with dist/*.whl calliope --help
+      - name: Smoke test (source distribution)
+        run: uv run --isolated --no-project --with dist/*.tar.gz calliope --help
+      - name: Publish on success
+        run: uv publish --index testpypi --trusted-publishing always
