@@ -103,7 +103,7 @@ This is followed by the definition of parameters to use to constrain the technol
 !!! note
     There are technically no restrictions on the units used in model definitions.
     Usually, the units will be kW and kWh, alongside a currency like USD or EUR for costs.
-    There is nothing preventing the use of other units, but yt is the responsibility of the modeler to ensure that units are correct and consistent.
+    There is nothing preventing the use of other units, but it is the responsibility of the modeler to ensure that units are correct and consistent.
 
 The second technology is `csp` (concentrating solar power), and serves as an example of a complex supply technology making use of:
 
